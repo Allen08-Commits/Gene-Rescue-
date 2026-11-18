@@ -1,82 +1,88 @@
 
-"""External biological database integrations."""
+"""Shared utilities for external biological database APIs."""
 
-from datetime import datetime, timezone
-from typing import Any
-
+import os
 import requests
 
 
-class ExternalDatabaseError(Exception):
-    """Raised when an external database cannot return usable data."""
+class ExternalDatabaseError(RuntimeError):
+    """Raised when an external database request fails."""
 
 
-def request_json(
-    url: str,
-    params: dict | None = None,
-    headers: dict | None = None,
-    timeout: int = 30,
-) -> Any:
-    """Perform a GET request and return JSON with consistent error handling."""
-    request_headers = {
-        "User-Agent": "GeneRescueAI/1.0 (bioinformatics research application)",
-        "Accept": "application/json",
-    }
-    if headers:
-        request_headers.update(headers)
+DEFAULT_TIMEOUT = 30
 
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "GeneRescueAI/1.0 (Bioinformatics Research Platform)",
+    "Accept": "application/json",
+})
+
+
+def request_json(url, params=None, headers=None, timeout=DEFAULT_TIMEOUT):
+    """Send an HTTP request and return parsed JSON."""
     try:
-        response = requests.get(
+        response = SESSION.get(
             url,
             params=params,
-            headers=request_headers,
+            headers=headers,
             timeout=timeout,
         )
         response.raise_for_status()
-        return response.json()
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ExternalDatabaseError(
+                "The external service returned invalid JSON."
+            ) from exc
+
     except requests.RequestException as exc:
         raise ExternalDatabaseError(
             f"External database request failed: {exc}"
         ) from exc
-    except ValueError as exc:
-        raise ExternalDatabaseError(
-            "The database returned a response that was not valid JSON."
-        ) from exc
 
 
-def request_text(
-    url: str,
-    params: dict | None = None,
-    headers: dict | None = None,
-    timeout: int = 30,
-) -> str:
-    """Perform a GET request and return its text response."""
-    request_headers = {
-        "User-Agent": "GeneRescueAI/1.0 (bioinformatics research application)"
-    }
-    if headers:
-        request_headers.update(headers)
-
+def request_text(url, params=None, headers=None, timeout=DEFAULT_TIMEOUT):
+    """Send an HTTP request and return response text."""
     try:
-        response = requests.get(
+        response = SESSION.get(
             url,
             params=params,
-            headers=request_headers,
+            headers=headers,
             timeout=timeout,
         )
         response.raise_for_status()
         return response.text
+
     except requests.RequestException as exc:
         raise ExternalDatabaseError(
             f"External database request failed: {exc}"
         ) from exc
 
 
-def provenance(source: str, endpoint: str, query: dict | str) -> dict:
-    """Create a record of where and when retrieved data came from."""
+def ncbi_parameters():
+    """Return optional NCBI credentials and application identity."""
+    params = {
+        "tool": "GeneRescueAI",
+        "email": os.getenv("NCBI_EMAIL", ""),
+    }
+
+    api_key = os.getenv("NCBI_API_KEY", "")
+
+    if api_key:
+        params["api_key"] = api_key
+
+    return {
+        key: value
+        for key, value in params.items()
+        if value
+    }
+
+
+def provenance(source, endpoint, query=None):
+    """Create a source provenance record."""
     return {
         "source": source,
         "endpoint": endpoint,
         "query": query,
-        "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
     }
