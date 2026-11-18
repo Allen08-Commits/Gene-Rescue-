@@ -1,46 +1,47 @@
 
-"""Gramene documented gene annotation search integration."""
+"""Gramene resource links for GeneRescue AI."""
 
-from integrations import provenance, request_json
-
-BASE_URL = "https://data.gramene.org"
+from urllib.parse import quote
 
 
-def search_gramene_genes(
-    query: str,
-    limit: int = 10,
-) -> dict:
-    """Search Gramene gene annotations by keyword."""
-    if not query.strip():
-        raise ValueError("Enter a gene name or keyword.")
+def resource_links(query):
+    """Return clearly labelled external resource search links."""
 
-    if not 1 <= limit <= 100:
-        raise ValueError("Limit must be between 1 and 100.")
+    if not query or not query.strip():
+        raise ValueError("Enter a crop, gene or trait.")
 
-    endpoint = BASE_URL + "/genes"
-    params = {
-        "q": query.strip(),
-        "fl": "_id,name,biotype,species,location",
-        "size": limit,
-    }
+    encoded = quote(query.strip())
 
-    data = request_json(endpoint, params=params)
-
-    return {
-        "query": query,
-        "results": data,
-        "provenance": provenance("Gramene", endpoint, params),
-    }
-
-
-def gramene_gene_url(gene_identifier: str) -> str:
-    """Return a Gramene gene search URL for manual inspection."""
-    if not gene_identifier.strip():
-        raise ValueError("Enter a gene identifier.")
-
-    from urllib.parse import quote
-
-    return (
-        "https://www.gramene.org/search?"
-        f"q={quote(gene_identifier.strip())}"
-    )
+    return [
+        {
+            "name": "Gramene",
+            "url": (
+                "https://www.gramene.org/search?"
+                f"q={encoded}"
+            ),
+            "note": (
+                "Search Gramene's crop genomics and "
+                "comparative genomics resources."
+            ),
+        },
+        {
+            "name": "Ensembl Plants",
+            "url": (
+                "https://plants.ensembl.org/Multi/Search/Results?"
+                f"q={encoded}"
+            ),
+            "note": (
+                "Search plant genome and gene resources."
+            ),
+        },
+        {
+            "name": "NCBI",
+            "url": (
+                "https://www.ncbi.nlm.nih.gov/search/all/?term="
+                f"{encoded}"
+            ),
+            "note": (
+                "Search NCBI biological records and resources."
+            ),
+        },
+    ]
