@@ -1,30 +1,29 @@
 
-"""NCBI Entrez E-utilities integration."""
+"""NCBI integration for GeneRescue AI."""
 
 import os
-import xml.etree.ElementTree as ET
-
 import streamlit as st
 
 from integrations import (
-    ExternalDatabaseError,
-    provenance,
     request_json,
     request_text,
+    provenance,
+    ExternalDatabaseError,
 )
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
 
-def _setting(name: str, default: str = "") -> str:
+def _setting(name):
     try:
-        return str(st.secrets.get(name, os.getenv(name, default)))
+        return str(st.secrets.get(name, os.getenv(name, ""))).strip()
     except Exception:
-        return os.getenv(name, default)
+        return os.getenv(name, "").strip()
 
 
-def _params(extra: dict) -> dict:
-    params = dict(extra)
+def _params(values):
+    params = dict(values)
+    params["tool"] = "GeneRescueAI"
 
     email = _setting("NCBI_EMAIL")
     api_key = _setting("NCBI_API_KEY")
@@ -34,34 +33,21 @@ def _params(extra: dict) -> dict:
     if api_key:
         params["api_key"] = api_key
 
-    params["tool"] = "GeneRescueAI"
     return params
 
 
-def search_ncbi(
-    query: str,
-    database: str = "gene",
-    limit: int = 10,
-) -> dict:
-    """Search an NCBI Entrez database and return matching identifiers."""
+def _search(query, database, retmax=10):
     if not query or not query.strip():
-        raise ValueError("Enter a search term.")
+        raise ValueError("Enter a search query.")
 
-    allowed = {
-        "gene", "nuccore", "protein", "assembly",
-        "sra", "biosample", "bioproject", "pubmed",
-    }
-    if database not in allowed:
-        raise ValueError(f"Unsupported NCBI database: {database}")
-
-    if not 1 <= limit <= 100:
-        raise ValueError("Limit must be between 1 and 100.")
+    if not 1 <= int(retmax) <= 100:
+        raise ValueError("Maximum records must be between 1 and 100.")
 
     endpoint = BASE_URL + "esearch.fcgi"
     params = _params({
         "db": database,
         "term": query.strip(),
-        "retmax": limit,
+        "retmax": int(retmax),
         "retmode": "json",
     })
 
@@ -77,13 +63,30 @@ def search_ncbi(
     }
 
 
-def fetch_ncbi_summary(
-    ids: list[str],
-    database: str = "gene",
-) -> dict:
-    """Retrieve summaries for a list of Entrez identifiers."""
+def search_gene(query, organism=None, retmax=10):
+    """Search NCBI Gene records."""
+    search_term = query.strip()
+
+    if organism:
+        search_term += f" AND {organism.strip()}[Organism]"
+
+    return _search(search_term, "gene", retmax)
+
+
+def search_nucleotide(query, retmax=10):
+    """Search NCBI nucleotide records."""
+    return _search(query, "nuccore", retmax)
+
+
+def search_protein(query, retmax=10):
+    """Search NCBI protein records."""
+    return _search(query, "protein", retmax)
+
+
+def fetch_summaries(ids, database="gene"):
+    """Retrieve summaries for Entrez identifiers."""
     if not ids:
-        raise ValueError("At least one NCBI identifier is required.")
+        return []
 
     endpoint = BASE_URL + "esummary.fcgi"
     params = _params({
@@ -94,37 +97,30 @@ def fetch_ncbi_summary(
 
     data = request_json(endpoint, params=params)
     result = data.get("result", {})
-    summaries = [
+
+    records = [
         result[item]
         for item in result.get("uids", [])
         if item in result
     ]
 
     return {
-        "database": database,
-        "records": summaries,
-        "record_count": len(summaries),
+        "records": records,
+        "count": len(records),
         "provenance": provenance("NCBI Entrez", endpoint, params),
     }
 
 
-def fetch_ncbi_record(
-    identifier: str,
-    database: str = "nuccore",
-    rettype: str = "gb",
-    retmode: str = "text",
-) -> dict:
-    """Retrieve a full NCBI record, such as a GenBank or FASTA record."""
-    if not identifier or not identifier.strip():
-        raise ValueError("Enter an accession or NCBI identifier.")
-
-    if database not in {"nuccore", "protein"}:
-        raise ValueError("Record retrieval supports nuccore or protein.")
+def fetch_record(identifier, database="nuccore",
+                 rettype="gb", retmode="text"):
+    """Retrieve a GenBank, FASTA or other supported record."""
+    if database not in {"nuccore", "protein", "gene"}:
+        raise ValueError("Unsupported NCBI database.")
 
     endpoint = BASE_URL + "efetch.fcgi"
     params = _params({
         "db": database,
-        "id": identifier.strip(),
+        "id": str(identifier).strip(),
         "rettype": rettype,
         "retmode": retmode,
     })
@@ -139,26 +135,16 @@ def fetch_ncbi_record(
     }
 
 
-def fetch_ncbi_gene_xml(gene_id: str) -> dict:
-    """Retrieve an NCBI Gene record in XML format."""
-    endpoint = BASE_URL + "efetch.fcgi"
-    params = _params({
-        "db": "gene",
-        "id": gene_id,
-        "retmode": "xml",
-    })
+# Backward-compatible function names
 
-    content = request_text(endpoint, params=params)
+def search_ncbi(query, database="gene", limit=10):
+    return _search(query, database, limit)
 
-    try:
-        root = ET.fromstring(content)
-    except ET.ParseError as exc:
-        raise ExternalDatabaseError(
-            "NCBI returned invalid Gene XML."
-        ) from exc
 
-    return {
-        "gene_id": gene_id,
-        "xml": ET.tostring(root, encoding="unicode"),
-        "provenance": provenance("NCBI Gene", endpoint, params),
-    }
+def fetch_ncbi_summary(ids, database="gene"):
+    return fetch_summaries(ids, database)
+
+
+def fetch_ncbi_record(identifier, database="nuccore",
+                      rettype="gb", retmode="text"):
+    return fetch_record(identifier, database, rettype, retmode)
