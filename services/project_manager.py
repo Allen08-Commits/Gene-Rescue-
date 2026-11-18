@@ -1,93 +1,68 @@
 
-"""Session-only research project management."""
-
-import uuid
+"""Temporary research project management using Streamlit session state."""
+import streamlit as st
+from uuid import uuid4
 from datetime import datetime, timezone
 
-import streamlit as st
 
-
-def create_project(
-    project_name: str,
-    description: str = "",
-    organism: str = "",
-    crop: str = "",
-) -> dict:
-    """Create a research project in the current session."""
-
-    if not project_name or not project_name.strip():
-        raise ValueError("Project name is required.")
-
-    project = {
-        "id": str(uuid.uuid4()),
-        "project_name": project_name.strip(),
-        "description": description.strip(),
-        "organism": organism.strip(),
-        "crop": crop.strip(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+def _projects():
     if "research_projects" not in st.session_state:
         st.session_state["research_projects"] = []
+    return st.session_state["research_projects"]
 
-    st.session_state["research_projects"].insert(0, project)
 
+def create_project(project_name, description="", organism="", crop=""):
+    name = str(project_name).strip()
+
+    if not name:
+        raise ValueError("Enter a project name.")
+
+    project = {
+        "project_id": str(uuid4()),
+        "project_name": name,
+        "description": str(description),
+        "organism": str(organism),
+        "crop": str(crop),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _projects().insert(0, project)
     return project
 
 
-def list_projects() -> list[dict]:
-    """List projects in the current session."""
-
-    return st.session_state.get("research_projects", [])
+def list_projects():
+    return _projects()
 
 
-def get_project(project_id: str) -> dict | None:
-    """Retrieve a project by its local ID."""
+def get_project(project_id):
+    return next(
+        (p for p in _projects() if p["project_id"] == project_id),
+        None,
+    )
 
-    for project in list_projects():
-        if project.get("id") == project_id:
+
+def update_project(project_id, updates):
+    allowed = {"project_name", "description", "organism", "crop"}
+
+    for project in _projects():
+        if project["project_id"] == project_id:
+            for key, value in updates.items():
+                if key in allowed:
+                    project[key] = str(value)
+
+            project["updated_at"] = datetime.now(timezone.utc).isoformat()
             return project
 
     return None
 
 
-def update_project(project_id: str, updates: dict) -> dict:
-    """Update a project in the current session."""
+def delete_project(project_id):
+    projects = _projects()
+    before = len(projects)
 
-    allowed = {
-        "project_name",
-        "description",
-        "organism",
-        "crop",
-    }
-
-    payload = {
-        key: value
-        for key, value in updates.items()
-        if key in allowed
-    }
-
-    if not payload:
-        raise ValueError("No valid project fields were supplied.")
-
-    for project in st.session_state.get("research_projects", []):
-        if project.get("id") == project_id:
-            project.update(payload)
-            return project
-
-    raise ValueError("Project was not found.")
-
-
-def delete_project(project_id: str) -> bool:
-    """Delete a project from the current session."""
-
-    projects = st.session_state.get("research_projects", [])
-    remaining = [
-        project for project in projects
-        if project.get("id") != project_id
+    st.session_state["research_projects"] = [
+        p for p in projects if p["project_id"] != project_id
     ]
 
-    deleted = len(remaining) != len(projects)
-    st.session_state["research_projects"] = remaining
-
-    return deleted
+    return len(st.session_state["research_projects"]) < before
