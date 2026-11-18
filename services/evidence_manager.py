@@ -1,144 +1,97 @@
- 
-"""Session-only evidence management for GeneRescue AI."""
 
+"""Manage evidence records collected from external databases."""
+import streamlit as st
+from uuid import uuid4
 from datetime import datetime, timezone
-from urllib.parse import quote
-import uuid
-
-VALID_EVIDENCE_CLASSES = {
-    "experimental",
-    "curated_annotation",
-    "computational_prediction",
-    "database_annotation",
-    "literature",
-}
 
 
-def classify_evidence(
-    source_database: str,
-    evidence_type: str,
-) -> str:
-    """Assign a conservative evidence category."""
+def _records():
+    if "research_evidence" not in st.session_state:
+        st.session_state["research_evidence"] = []
+    return st.session_state["research_evidence"]
 
-    source = source_database.strip().lower()
-    evidence = evidence_type.strip().lower()
 
-    if source == "pubmed" or "article" in evidence:
-        return "literature"
+def classify_evidence(database, record_type=""):
+    text = f"{database} {record_type}".lower()
 
-    if "experimental" in evidence or "assay" in evidence:
-        return "experimental"
-
-    if source in {"uniprot", "interpro", "gramene"}:
-        return "curated_annotation"
-
-    if "prediction" in evidence or "predicted" in evidence:
-        return "computational_prediction"
-
-    return "database_annotation"
+    if any(x in text for x in ["ncbi", "gene", "genome", "ensembl"]):
+        return "Gene/genomic evidence"
+    if any(x in text for x in ["uniprot", "protein", "interpro"]):
+        return "Protein/function evidence"
+    if any(x in text for x in ["pubmed", "publication", "article"]):
+        return "Literature evidence"
+    if any(x in text for x in ["gramene", "plant", "crop", "trait"]):
+        return "Plant/trait evidence"
+    return "Other evidence"
 
 
 def save_evidence(
-    source_database: str,
-    source_identifier: str,
-    evidence_type: str,
-    evidence_title: str = "",
-    evidence_description: str = "",
-    source_url: str = "",
-    retrieval_query: dict | None = None,
-    evidence_payload: dict | list | None = None,
-    evidence_class: str | None = None,
-    project_id: str | None = None,
-    session_id: str | None = None,
-) -> dict:
-    """Save an evidence record in the current app session."""
-
-    if not source_database.strip():
-        raise ValueError("Source database is required.")
-
-    if not evidence_type.strip():
-        raise ValueError("Evidence type is required.")
-
-    category = evidence_class or classify_evidence(
-        source_database,
-        evidence_type,
-    )
-
-    if category not in VALID_EVIDENCE_CLASSES:
-        raise ValueError("Invalid evidence classification.")
-
+    database,
+    identifier,
+    description="",
+    source_url="",
+    record_type="database record",
+    project_id=None,
+    session_id=None,
+):
     record = {
-        "id": str(uuid.uuid4()),
-        "source_database": source_database.strip(),
-        "source_identifier": source_identifier or "",
-        "evidence_type": evidence_type.strip(),
-        "evidence_title": evidence_title or "",
-        "evidence_description": evidence_description or "",
-        "source_url": source_url or "",
-        "retrieval_query": retrieval_query or {},
-        "evidence_payload": evidence_payload or {},
-        "evidence_class": category,
+        "evidence_id": str(uuid4()),
+        "database": str(database),
+        "identifier": str(identifier),
+        "description": str(description),
+        "source_url": str(source_url),
+        "record_type": str(record_type),
+        "evidence_class": classify_evidence(database, record_type),
         "project_id": project_id,
         "session_id": session_id,
-        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    import streamlit as st
+    existing = _records()
+    duplicate = next(
+        (
+            item for item in existing
+            if item["database"] == record["database"]
+            and item["identifier"] == record["identifier"]
+            and item["project_id"] == project_id
+        ),
+        None,
+    )
 
-    if "research_evidence" not in st.session_state:
-        st.session_state["research_evidence"] = []
+    if duplicate:
+        return duplicate
 
-    st.session_state["research_evidence"].insert(0, record)
-
+    existing.insert(0, record)
     return record
 
 
-def list_evidence(
-    project_id: str | None = None,
-    session_id: str | None = None,
-    limit: int = 100,
-) -> list[dict]:
-    """Return evidence records from the current app session."""
+def list_evidence(project_id=None, session_id=None, limit=100):
+    records = _records()
 
-    if not 1 <= limit <= 500:
-        raise ValueError("Limit must be between 1 and 500.")
+    if project_id is not None:
+        records = [r for r in records if r["project_id"] == project_id]
 
-    import streamlit as st
+    if session_id is not None:
+        records = [r for r in records if r["session_id"] == session_id]
 
-    records = st.session_state.get("research_evidence", [])
-
-    if project_id:
-        records = [
-            item for item in records
-            if item.get("project_id") == project_id
-        ]
-
-    if session_id:
-        records = [
-            item for item in records
-            if item.get("session_id") == session_id
-        ]
-
-    return records[:limit]
+    return records[:max(0, int(limit))]
 
 
-def evidence_source_link(database: str, identifier: str) -> str:
-    """Build source links for supported database identifiers."""
+def evidence_source_link(database, identifier):
+    database = str(database).lower()
+    identifier = str(identifier).strip()
 
-    database = database.strip().lower()
-    identifier = quote((identifier or "").strip(), safe="")
+    if database in {"ncbi", "gene"}:
+        return f"https://www.ncbi.nlm.nih.gov/gene/?term={identifier}"
+    if database in {"ensembl", "ensembl plants"}:
+        return f"https://plants.ensembl.org/Multi/Search/Results?q={identifier}"
+    if database == "uniprot":
+        return f"https://www.uniprot.org/uniprotkb/{identifier}/entry"
+    if database == "interpro":
+        return f"https://www.ebi.ac.uk/interpro/protein/UniProt/{identifier}"
+    if database in {"pubmed", "literature"}:
+        return f"https://pubmed.ncbi.nlm.nih.gov/{identifier}/"
+    if database == "gramene":
+        return f"https://www.gramene.org/search?query={identifier}"
 
-    if not identifier:
-        return ""
-
-    links = {
-        "ncbi_gene": f"https://www.ncbi.nlm.nih.gov/gene/{identifier}",
-        "ncbi_nucleotide": f"https://www.ncbi.nlm.nih.gov/nuccore/{identifier}",
-        "ncbi_protein": f"https://www.ncbi.nlm.nih.gov/protein/{identifier}",
-        "uniprot": f"https://www.uniprot.org/uniprotkb/{identifier}",
-        "interpro": f"https://www.ebi.ac.uk/interpro/entry/InterPro/{identifier}",
-        "pubmed": f"https://pubmed.ncbi.nlm.nih.gov/{identifier}/",
-        "ensembl": f"https://plants.ensembl.org/id/{identifier}",
-    }
-
-    return links.get(database, "")
+    return ""
