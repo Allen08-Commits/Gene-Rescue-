@@ -2,149 +2,145 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root {
-    --green: #397A58;
-    --green-dark: #24563C;
-    --green-light: #EAF2EB;
+    --forest: #285B40;
+    --forest-dark: #173F30;
+    --sage: #EAF0E9;
+    --mint: #F2F7F1;
+    --paper: #F7F9F6;
     --ink: #20372B;
-    --muted: #718078;
-    --surface: #FFFFFF;
-    --background: #F7F9F6;
-    --border: #E1E9E1;
+    --muted: #6B7D70;
+    --line: #DCE6DC;
+    --white: #FFFFFF;
 }
 
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
-}
-
-.stApp {
-    background: var(--background);
     color: var(--ink);
 }
 
+.stApp {
+    background: var(--paper);
+}
+
 .block-container {
-    max-width: 1240px;
+    max-width: 1200px;
     padding-top: 2rem;
     padding-bottom: 3rem;
 }
 
 h1, h2, h3 {
-    font-family: 'Manrope', sans-serif !important;
+    font-family: 'Manrope', sans-serif;
     color: var(--ink);
-    letter-spacing: -0.5px;
+    font-weight: 750;
 }
 
 .brand-title {
     font-family: 'Manrope', sans-serif;
-    font-size: clamp(2.3rem, 5vw, 4.2rem);
+    font-size: clamp(2.2rem, 5vw, 4rem);
     font-weight: 800;
-    color: var(--green-dark);
+    color: var(--forest-dark);
     letter-spacing: -2px;
-    line-height: 1.1;
 }
 
 .brand-subtitle {
     color: var(--muted);
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 2px;
+    font-size: 1.08rem;
+    line-height: 1.7;
+}
+
+.brand-small {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--forest-dark);
+    padding: 0.4rem 0;
 }
 
 .page-heading {
+    font-family: 'Manrope', sans-serif;
     font-size: 2rem;
     font-weight: 800;
-    margin-bottom: 0.3rem;
+    color: var(--forest-dark);
 }
 
 .page-description {
     color: var(--muted);
-    margin-bottom: 1.6rem;
+    font-size: 1rem;
+    line-height: 1.7;
 }
 
 .tool-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--white);
+    border: 1px solid var(--line);
     border-radius: 16px;
-    padding: 22px;
-    min-height: 165px;
-    transition: 0.2s ease;
+    padding: 1.3rem;
+    min-height: 145px;
 }
 
-.tool-card:hover {
-    border-color: var(--green);
-    box-shadow: 0 8px 24px rgba(36, 86, 60, 0.08);
-    transform: translateY(-2px);
-}
-
-.tool-icon {
-    font-size: 1.8rem;
-    margin-bottom: 12px;
-}
-
-.tool-title {
-    color: var(--ink);
-    font-weight: 700;
+.tool-card h3 {
     font-size: 1.05rem;
+    margin-bottom: 0.45rem;
 }
 
-.tool-description {
+.tool-card p {
     color: var(--muted);
-    font-size: 0.88rem;
-    line-height: 1.5;
+    font-size: 0.9rem;
+    line-height: 1.55;
 }
 
 div.stButton > button {
-    border-radius: 9px;
-    border: 1px solid var(--green);
-    font-weight: 600;
-    min-height: 42px;
-}
-
-div.stButton > button[kind="primary"] {
-    background: var(--green);
+    background: var(--forest);
     color: white;
+    border: 1px solid var(--forest);
+    border-radius: 10px;
+    min-height: 2.7rem;
+    font-weight: 650;
+    transition: 0.2s ease;
 }
 
-div.stButton > button[kind="primary"]:hover {
-    background: var(--green-dark);
-    border-color: var(--green-dark);
-}
-
-div[data-testid="stForm"] {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 22px;
+div.stButton > button:hover {
+    background: var(--forest-dark);
+    border-color: var(--forest-dark);
+    color: white;
 }
 
 div[data-testid="stMetric"] {
     background: white;
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 12px;
-    padding: 16px;
+    padding: 1rem;
 }
 
-.profile-chip {
-    color: var(--green-dark);
-    background: var(--green-light);
-    padding: 8px 14px;
-    border-radius: 30px;
-    font-weight: 600;
+div[data-testid="stFileUploader"] {
+    background: white;
+    border: 1px dashed #AFC5B1;
+    border-radius: 12px;
+    padding: 0.7rem;
+}
+
+div[data-testid="stDataFrame"] {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+
+.stTextInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] {
+    border-radius: 9px;
 }
 
 hr {
-    border-color: var(--border);
+    border-color: var(--line);
 }
 
 footer {
     visibility: hidden;
 }
 
-@media (max-width: 768px) {
-    .block-container {
-        padding: 1rem;
-    }
+#MainMenu {
+    visibility: hidden;
+}
 
-    .brand-title {
-        letter-spacing: -1px;
-    }
+header[data-testid="stHeader"] {
+    background: transparent;
 }
