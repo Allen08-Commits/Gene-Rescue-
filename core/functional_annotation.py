@@ -1,136 +1,86 @@
 
-from __future__ import annotations
+"""Functional annotation normalization and integration."""
 
-from typing import Any
+import pandas as pd
 
 
-def normalize_annotation(
-    source: str,
-    accession: str,
-    annotation: dict[str, Any]
-) -> dict[str, Any]:
-    """
-    Convert an external database annotation into
-    a consistent GeneRescue AI record.
-    """
-
-    if not source or not accession:
-        raise ValueError(
-            "Annotation source and accession are required."
-        )
+def normalize_annotation(record, source="Unknown"):
+    """Convert an annotation record into a consistent structure."""
+    if not isinstance(record, dict):
+        raise TypeError("Annotation record must be a dictionary.")
 
     return {
-        "source": source,
-        "accession": accession,
-        "protein_name": annotation.get(
-            "protein_name"
+        "Source": source,
+        "Identifier": (
+            record.get("accession")
+            or record.get("id")
+            or record.get("identifier")
+            or record.get("gene_id")
+            or ""
         ),
-        "gene_name": annotation.get(
-            "gene_name"
+        "Name": (
+            record.get("protein_name")
+            or record.get("name")
+            or record.get("description")
+            or record.get("gene_name")
+            or ""
         ),
-        "organism": annotation.get(
-            "organism"
+        "Organism": (
+            record.get("organism")
+            or record.get("species")
+            or ""
         ),
-        "function": annotation.get(
-            "function"
+        "Function": (
+            record.get("function")
+            or record.get("annotation")
+            or record.get("description")
+            or ""
         ),
-        "domains": annotation.get(
-            "domains", []
+        "Evidence": (
+            record.get("evidence")
+            or record.get("evidence_type")
+            or ""
         ),
-        "go_terms": annotation.get(
-            "go_terms", []
+        "Source URL": (
+            record.get("source_url")
+            or record.get("url")
+            or ""
         ),
-        "pathways": annotation.get(
-            "pathways", []
-        ),
-        "evidence_codes": annotation.get(
-            "evidence_codes", []
-        ),
-        "source_url": annotation.get(
-            "source_url"
-        ),
-        "retrieved_at": annotation.get(
-            "retrieved_at"
-        ),
-        "annotation_status": (
-            "Retrieved database annotation"
-        )
+        "Raw record": record,
     }
 
 
-def validate_annotation(
-    annotation: dict[str, Any]
-) -> dict[str, Any]:
-    required = {
-        "source",
-        "accession"
-    }
-
-    missing = required - set(annotation.keys())
-
-    if missing:
-        raise ValueError(
-            f"Missing annotation fields: {', '.join(sorted(missing))}"
-        )
-
-    if not annotation["source"] or not annotation["accession"]:
-        raise ValueError(
-            "Source and accession cannot be empty."
-        )
-
-    return annotation
-
-
-def merge_annotations(
-    annotations: list[dict[str, Any]]
-) -> dict[str, Any]:
+def merge_annotations(annotation_groups):
     """
-    Combine annotations while preserving their
-    individual database provenance.
-    """
+    Combine annotation groups while preserving their source.
 
-    validated = [
-        validate_annotation(item)
-        for item in annotations
+    Expected input:
+    [
+        {"source": "UniProt", "records": [...]},
+        {"source": "InterPro", "records": [...]}
     ]
+    """
+    normalized = []
 
-    if not validated:
-        return {
-            "accession": None,
-            "sources": [],
-            "annotations": [],
-            "interpretation": (
-                "No external functional annotations were retrieved."
+    for group in annotation_groups:
+        source = group.get("source", "Unknown")
+        records = group.get("records", [])
+
+        for record in records:
+            normalized.append(
+                normalize_annotation(record, source=source)
             )
-        }
 
-    accessions = {
-        item["accession"]
-        for item in validated
-    }
+    if not normalized:
+        return pd.DataFrame(columns=[
+            "Source",
+            "Identifier",
+            "Name",
+            "Organism",
+            "Function",
+            "Evidence",
+            "Source URL",
+            "Raw record",
+        ])
 
-    if len(accessions) > 1:
-        return {
-            "accession": None,
-            "sources": sorted({
-                item["source"] for item in validated
-            }),
-            "annotations": validated,
-            "interpretation": (
-                "Records have different accessions. "
-                "They are preserved separately and must not "
-                "be treated as annotations of one identical protein."
-            )
-        }
-
-    return {
-        "accession": next(iter(accessions)),
-        "sources": sorted({
-            item["source"] for item in validated
-        }),
-        "annotations": validated,
-        "interpretation": (
-            "Multiple external records are grouped by accession. "
-            "Differences between database annotations should be reviewed."
-        )
-    }
+    return pd.DataFrame(normalized)
