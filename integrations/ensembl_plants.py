@@ -1,101 +1,116 @@
 
-"""Ensembl Plants REST API integration."""
+"""Ensembl Plants integration for GeneRescue AI."""
 
 from integrations import (
-    ExternalDatabaseError,
-    provenance,
     request_json,
     request_text,
+    provenance,
 )
 
 BASE_URL = "https://rest.ensembl.org"
 
 
-def _plant_get(path: str, params: dict | None = None):
-    url = BASE_URL + path
-    headers = {"Accept": "application/json"}
-    data = request_json(url, params=params, headers=headers)
-    return data, url
+def _get(path, params=None):
+    endpoint = BASE_URL + path
 
-
-def lookup_gene(identifier: str, expand: bool = True) -> dict:
-    """Retrieve an Ensembl gene or transcript record by stable ID."""
-    if not identifier.strip():
-        raise ValueError("Enter an Ensembl stable identifier.")
-
-    params = {"expand": 1 if expand else 0}
-    data, url = _plant_get(
-        f"/lookup/id/{identifier.strip()}",
+    data = request_json(
+        endpoint,
         params=params,
+        headers={"Accept": "application/json"},
+    )
+
+    return data, endpoint
+
+
+def search_plant_genes(query, species="oryza_sativa"):
+    """Search Ensembl Plants for gene symbols or external names."""
+    if not query.strip() or not species.strip():
+        raise ValueError("Gene query and species are required.")
+
+    endpoint = (
+        f"{BASE_URL}/xrefs/symbol/"
+        f"{species.strip()}/{query.strip()}"
+    )
+
+    params = {"object_type": "gene"}
+
+    records = request_json(
+        endpoint,
+        params=params,
+        headers={"Accept": "application/json"},
     )
 
     return {
-        "identifier": identifier,
-        "record": data,
-        "provenance": provenance("Ensembl REST", url, params),
+        "database": "Ensembl Plants",
+        "query": query,
+        "species": species,
+        "records": records,
+        "count": len(records) if isinstance(records, list) else 0,
+        "provenance": provenance(
+            "Ensembl Plants",
+            endpoint,
+            params,
+        ),
     }
 
 
-def get_gene_sequence(
-    identifier: str,
-    sequence_type: str = "genomic",
-) -> dict:
-    """Retrieve a sequence by Ensembl stable identifier."""
-    allowed = {"genomic", "cdna", "cds", "protein"}
-    if sequence_type not in allowed:
-        raise ValueError(
-            "Sequence type must be genomic, cdna, cds or protein."
-        )
+def lookup_gene(identifier, expand=True):
+    """Retrieve a gene record by Ensembl stable ID."""
+    if not identifier.strip():
+        raise ValueError("Ensembl identifier is required.")
 
-    url = f"{BASE_URL}/sequence/id/{identifier.strip()}"
+    params = {"expand": int(bool(expand))}
+    data, endpoint = _get(
+        f"/lookup/id/{identifier.strip()}",
+        params,
+    )
+
+    return {
+        "record": data,
+        "provenance": provenance(
+            "Ensembl Plants", endpoint, params
+        ),
+    }
+
+
+def get_gene_sequence(identifier, sequence_type="cdna"):
+    """Retrieve genomic, cDNA, CDS or protein sequence."""
+    allowed = {"genomic", "cdna", "cds", "protein"}
+
+    if sequence_type not in allowed:
+        raise ValueError("Unsupported sequence type.")
+
+    endpoint = f"{BASE_URL}/sequence/id/{identifier.strip()}"
     params = {"type": sequence_type}
 
     sequence = request_text(
-        url,
+        endpoint,
         params=params,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "text/plain"},
     )
 
     return {
         "identifier": identifier,
         "sequence_type": sequence_type,
         "sequence": sequence.strip(),
-        "provenance": provenance("Ensembl REST", url, params),
-    }
-
-
-def get_cross_references(identifier: str) -> dict:
-    """Retrieve external database cross-references for an Ensembl ID."""
-    data, url = _plant_get(
-        f"/xrefs/id/{identifier.strip()}",
-        params={"all_levels": 1},
-    )
-
-    return {
-        "identifier": identifier,
-        "cross_references": data,
         "provenance": provenance(
-            "Ensembl REST",
-            url,
-            {"all_levels": 1},
+            "Ensembl Plants", endpoint, params
         ),
     }
 
 
-def search_gene_symbol(species: str, symbol: str) -> dict:
-    """Search Ensembl cross-references by species and gene symbol."""
-    if not species.strip() or not symbol.strip():
-        raise ValueError("Species and gene symbol are required.")
-
-    params = {"external_db": ""}
-    data, url = _plant_get(
-        f"/xrefs/symbol/{species.strip()}/{symbol.strip()}",
-        params=params,
+def get_cross_references(identifier):
+    """Retrieve cross-references for an Ensembl identifier."""
+    data, endpoint = _get(
+        f"/xrefs/id/{identifier.strip()}",
+        {"all_levels": 1},
     )
 
     return {
-        "species": species,
-        "symbol": symbol,
-        "matches": data,
-        "provenance": provenance("Ensembl REST", url, params),
+        "cross_references": data,
+        "provenance": provenance(
+            "Ensembl Plants",
+            endpoint,
+            {"all_levels": 1},
+        ),
     }
