@@ -1,150 +1,292 @@
 
-"""GeneRescue AI - Sequence Analysis."""
+"""Sequence Analysis research module."""
 
-import json
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-from core.data_loader import load_fasta
-from core.sequence_analysis import analyze_sequence
-from core.sequence_quality import composition_screen
+from core.data_loader import (
+    load_fasta,
+    load_fastq,
+    infer_sequence_type,
+)
+from core.sequence_analysis import (
+    analyze_sequence,
+    sliding_window_gc,
+)
+from core.sequence_quality import assess_sequence_quality
+
 from services.session_manager import create_research_session
+from services.project_manager import list_projects
+from services.report_manager import generate_pdf_report
 
 
 def render():
-    st.title("Sequence Analysis")
+    st.title("🧬 Sequence Analysis")
     st.write(
-        "Analyze DNA, RNA and protein sequences using "
-        "sequence composition and statistical methods."
+        "Analyze DNA, RNA and protein sequences with "
+        "composition, quality and statistical measurements."
     )
 
-    st.subheader("Sequence input")
+    tab1, tab2 = st.tabs([
+        "Upload sequence",
+        "Enter sequence",
+    ])
 
-    input_method = st.radio(
-        "Choose input method",
-        ["Upload FASTA", "Paste sequence"],
-        horizontal=True,
-    )
+    records = []
 
-    sequence = ""
-    sequence_name = "User sequence"
-
-    if input_method == "Upload FASTA":
-        uploaded_file = st.file_uploader(
-            "Upload your FASTA file",
-            type=["fa", "fasta", "fna", "faa"],
+    with tab1:
+        uploaded = st.file_uploader(
+            "Upload FASTA or FASTQ",
+            type=["fa", "fasta", "fna", "faa", "fq", "fastq"],
             key="sequence_upload",
         )
 
-        if uploaded_file:
+        if uploaded is not None:
             try:
-                records = load_fasta(uploaded_file)
+                if uploaded.name.lower().endswith(
+                    (".fq", ".fastq")
+                ):
+                    records = load_fastq(uploaded)
+                else:
+                    records = load_fasta(uploaded)
 
-                selected = st.selectbox(
-                    "Select sequence record",
-                    range(len(records)),
-                    format_func=lambda i: (
-                        f"{records[i]['id']} "
-                        f"({len(records[i]['sequence'])} characters)"
-                    ),
+                st.success(
+                    f"Loaded {len(records)} sequence record(s)."
                 )
 
-                sequence = records[selected]["sequence"]
-                sequence_name = records[selected]["id"]
+            except Exception as exc:
+                st.error(f"Sequence loading failed: {exc}")
 
-            except Exception as error:
-                st.error(f"FASTA processing failed: {error}")
-
-    else:
-        sequence = st.text_area(
-            "Paste biological sequence",
-            height=180,
-            placeholder="Paste your DNA, RNA or protein sequence here...",
+    with tab2:
+        sequence_text = st.text_area(
+            "Paste a DNA, RNA or protein sequence",
+            height=150,
+            placeholder="Enter your sequence here...",
         )
 
-    sequence_type = st.selectbox(
-        "Sequence type",
-        ["Auto-detect", "DNA", "RNA", "Protein"],
-        help=(
-            "Choose the correct type manually when a sequence contains "
-            "only A, C, G and T, since such a sequence can be ambiguous."
-        ),
+        sequence_type = st.selectbox(
+            "Sequence type",
+            ["Auto-detect", "DNA", "RNA", "Protein"],
+        )
+
+        if sequence_text.strip():
+            cleaned = "".join(sequence_text.split()).upper()
+
+            if sequence_type == "Auto-detect":
+                detected = infer_sequence_type(cleaned)
+            else:
+                detected = sequence_type
+
+            records = [{
+                "id": "Pasted sequence",
+                "description": "User-entered sequence",
+                "sequence": cleaned,
+                "sequence_type": detected,
+                "length": len(cleaned),
+            }]
+
+    if not records:
+        st.info("Upload a sequence file or enter a sequence to begin.")
+        return
+
+    labels = [
+        f"{record['id']} ({record['sequence_type']})"
+        for record in records
+    ]
+
+    selected = st.selectbox(
+        "Select sequence",
+        range(len(records)),
+        format_func=lambda index: labels[index],
     )
 
-    if st.button(
-        "Analyze Sequence",
-        type="primary",
-        disabled=not sequence.strip(),
-    ):
-        try:
-            result = analyze_sequence(
+    record = records[selected]
+    sequence = record["sequence"]
+    seq_type = record["sequence_type"]
+
+    if seq_type == "unknown":
+        st.error("The sequence type could not be determined.")
+        return
+
+    try:
+        result = analyze_sequence(sequence, seq_type)
+    except Exception as exc:
+        st.error(f"Analysis failed: {exc}")
+        return
+
+    st.divider()
+    st.subheader("Sequence statistics")
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Sequence length", f"{len(sequence):,}")
+    c2.metric("Sequence type", seq_type)
+    c3.metric(
+        "GC content",
+        f"{result.get('GC content (%)', 0):.2f}%"
+        if "GC content (%)" in result else "Not applicable",
+    )
+
+    st.dataframe(
+        pd.DataFrame([
+            {"Parameter": key, "Value": str(value)}
+            for key, value in result.items()
+            if key != "Sequence"
+            and not isinstance(value, dict)
+        ]),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if seq_type in ("DNA", "RNA"):
+        st.subheader("Nucleotide composition")
+
+        composition = {
+            base: sequence.count(base)
+            for base in ("A", "C", "G", "T", "U", "N")
+            if sequence.count(base) > 0
+        }
+
+        composition_df = pd.DataFrame(
+            list(composition.items()),
+            columns=["Nucleotide", "Count"],
+        )
+
+        fig = px.bar(
+            composition_df,
+            x="Nucleotide",
+            y="Count",
+            title="Nucleotide composition",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        if len(sequence) >= 100:
+            st.subheader("Sliding-window GC profile")
+
+            window = st.number_input(
+                "Window size",
+                min_value=10,
+                max_value=len(sequence),
+                value=min(100, len(sequence)),
+            )
+
+            step = st.number_input(
+                "Step size",
+                min_value=1,
+                max_value=len(sequence),
+                value=25,
+            )
+
+            gc_records = sliding_window_gc(
                 sequence,
-                sequence_type=sequence_type,
+                int(window),
+                int(step),
             )
 
-            quality = composition_screen(sequence)
+            gc_df = pd.DataFrame(gc_records)
 
-            st.session_state["last_sequence"] = sequence
-            st.session_state["last_sequence_result"] = result
-            st.session_state["last_sequence_quality"] = quality
+            if not gc_df.empty:
+                fig = px.line(
+                    gc_df,
+                    x="Start",
+                    y="GC content (%)",
+                    title="GC content across sequence",
+                )
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                )
 
-            st.divider()
-            st.subheader(f"Analysis Results: {sequence_name}")
+        quality_scores = record.get("phred_quality")
 
-            col1, col2, col3 = st.columns(3)
+        quality = assess_sequence_quality(
+            sequence,
+            quality_scores,
+        )
 
-            col1.metric(
-                "Sequence length",
-                result["Length"],
+        st.subheader("Sequence quality assessment")
+
+        st.dataframe(
+            pd.DataFrame([
+                {"Metric": key, "Value": str(value)}
+                for key, value in quality.items()
+            ]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        if quality_scores is None:
+            st.info(
+                "This sequence has no FASTQ Phred scores. "
+                "The displayed values are composition screening, "
+                "not sequencing quality scores."
             )
 
-            col2.metric(
-                "Sequence type",
-                result["Sequence type"],
-            )
+    st.subheader("Research project association")
 
-            col3.metric(
-                "Ambiguous symbols",
-                result["Ambiguous symbols"],
-            )
+    projects = list_projects()
 
-            st.subheader("Sequence statistics")
-            st.json(result)
+    project_options = ["No project"] + [
+        project["project_name"]
+        for project in projects
+    ]
 
-            st.subheader("Composition screening")
-            st.json(quality)
+    project_choice = st.selectbox(
+        "Associate this analysis with a project",
+        project_options,
+    )
 
-            report = {
-                "sequence_name": sequence_name,
-                "statistics": result,
-                "composition_screen": quality,
-            }
+    project_id = None
 
-            st.download_button(
-                "Download analysis results",
-                data=json.dumps(report, indent=4),
-                file_name="sequence_analysis.json",
-                mime="application/json",
-            )
+    if project_choice != "No project":
+        project_id = next(
+            p["project_id"]
+            for p in projects
+            if p["project_name"] == project_choice
+        )
 
-            create_research_session(
-                tool_name="Sequence Analysis",
-                session_title=f"Analysis of {sequence_name}",
-                input_summary=(
-                    f"Sequence type: {result['Sequence type']}; "
-                    f"Length: {result['Length']}"
-                ),
-                result_summary=(
-                    f"Analysis completed for {sequence_name}"
-                ),
-            )
+    if st.button("Save analysis to research history"):
+        create_research_session(
+            tool_name="Sequence Analysis",
+            session_title=f"Analysis of {record['id']}",
+            input_summary=(
+                f"Sequence length: {len(sequence)}; "
+                f"Type: {seq_type}"
+            ),
+            result_summary="Sequence statistics calculated.",
+            project_id=project_id,
+        )
+        st.success("Analysis saved to the current session.")
 
-            st.success("Sequence analysis completed.")
+    report_sections = [
+        {
+            "heading": "Sequence information",
+            "content": (
+                f"Record: {record['id']}\n"
+                f"Type: {seq_type}\n"
+                f"Length: {len(sequence)}"
+            ),
+        },
+        {
+            "heading": "Sequence statistics",
+            "dataframe": pd.DataFrame([
+                {"Parameter": key, "Value": str(value)}
+                for key, value in result.items()
+                if key != "Sequence"
+                and not isinstance(value, dict)
+            ]),
+        },
+    ]
 
-        except Exception as error:
-            st.error(f"Sequence analysis failed: {error}")
+    pdf = generate_pdf_report(
+        "GeneRescue AI - Sequence Analysis",
+        report_sections,
+    )
 
-    st.caption(
-        "Note: Composition screening is not a Phred-based "
-        "sequencing quality assessment."
+    st.download_button(
+        "Download sequence analysis PDF",
+        data=pdf,
+        file_name="sequence_analysis_report.pdf",
+        mime="application/pdf",
     )
