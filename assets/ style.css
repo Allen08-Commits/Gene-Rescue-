@@ -1,1 +1,150 @@
-..
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --green: #397A58;
+    --green-dark: #24563C;
+    --green-light: #EAF2EB;
+    --ink: #20372B;
+    --muted: #718078;
+    --surface: #FFFFFF;
+    --background: #F7F9F6;
+    --border: #E1E9E1;
+}
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+}
+
+.stApp {
+    background: var(--background);
+    color: var(--ink);
+}
+
+.block-container {
+    max-width: 1240px;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
+
+h1, h2, h3 {
+    font-family: 'Manrope', sans-serif !important;
+    color: var(--ink);
+    letter-spacing: -0.5px;
+}
+
+.brand-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: clamp(2.3rem, 5vw, 4.2rem);
+    font-weight: 800;
+    color: var(--green-dark);
+    letter-spacing: -2px;
+    line-height: 1.1;
+}
+
+.brand-subtitle {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+.page-heading {
+    font-size: 2rem;
+    font-weight: 800;
+    margin-bottom: 0.3rem;
+}
+
+.page-description {
+    color: var(--muted);
+    margin-bottom: 1.6rem;
+}
+
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    min-height: 165px;
+    transition: 0.2s ease;
+}
+
+.tool-card:hover {
+    border-color: var(--green);
+    box-shadow: 0 8px 24px rgba(36, 86, 60, 0.08);
+    transform: translateY(-2px);
+}
+
+.tool-icon {
+    font-size: 1.8rem;
+    margin-bottom: 12px;
+}
+
+.tool-title {
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.tool-description {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+div.stButton > button {
+    border-radius: 9px;
+    border: 1px solid var(--green);
+    font-weight: 600;
+    min-height: 42px;
+}
+
+div.stButton > button[kind="primary"] {
+    background: var(--green);
+    color: white;
+}
+
+div.stButton > button[kind="primary"]:hover {
+    background: var(--green-dark);
+    border-color: var(--green-dark);
+}
+
+div[data-testid="stForm"] {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+}
+
+div[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.profile-chip {
+    color: var(--green-dark);
+    background: var(--green-light);
+    padding: 8px 14px;
+    border-radius: 30px;
+    font-weight: 600;
+}
+
+hr {
+    border-color: var(--border);
+}
+
+footer {
+    visibility: hidden;
+}
+
+@media (max-width: 768px) {
+    .block-container {
+        padding: 1rem;
+    }
+
+    .brand-title {
+        letter-spacing: -1px;
+    }
+}
