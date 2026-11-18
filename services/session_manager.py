@@ -1,70 +1,50 @@
 
-"""Session-only research history for GeneRescue AI."""
-
-import uuid
+"""Session-based research activity management."""
 from datetime import datetime, timezone
-
+from uuid import uuid4
 import streamlit as st
 
 
-def create_research_session(
-    tool_name: str,
-    session_title: str,
-    input_summary: str = "",
-    result_summary: str = "",
-    project_id: str | None = None,
-    status: str = "completed",
-) -> dict:
-    """Add a research activity to the current browser session."""
-
-    if not tool_name.strip() or not session_title.strip():
-        raise ValueError("Tool name and title are required.")
-
-    if status not in {"completed", "in_progress", "failed"}:
-        raise ValueError("Invalid session status.")
-
-    record = {
-        "id": str(uuid.uuid4()),
-        "tool_name": tool_name.strip(),
-        "session_title": session_title.strip(),
-        "input_summary": input_summary,
-        "result_summary": result_summary,
-        "project_id": project_id,
-        "status": status,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+def _history():
     if "research_history" not in st.session_state:
         st.session_state["research_history"] = []
+    return st.session_state["research_history"]
 
-    st.session_state["research_history"].insert(0, record)
 
+def create_research_session(
+    tool_name,
+    session_title,
+    input_summary="",
+    result_summary="",
+    project_id=None,
+    status="completed",
+):
+    record = {
+        "session_id": str(uuid4()),
+        "tool_name": str(tool_name),
+        "session_title": str(session_title),
+        "input_summary": str(input_summary),
+        "result_summary": str(result_summary),
+        "project_id": project_id,
+        "status": str(status),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _history().insert(0, record)
     return record
 
 
-def list_research_sessions(
-    user_id: str | None = None,
-    limit: int = 50,
-) -> list[dict]:
-    """Return the current session's research history."""
-
-    if not 1 <= limit <= 200:
-        raise ValueError("Limit must be between 1 and 200.")
-
-    return st.session_state.get("research_history", [])[:limit]
+def list_research_sessions(user_id=None, limit=50):
+    # user_id is accepted for compatibility; this version has no accounts.
+    return _history()[:max(0, int(limit))]
 
 
-def get_research_session(session_id: str) -> dict | None:
-    """Find a research session by its local ID."""
-
-    for record in st.session_state.get("research_history", []):
-        if record.get("id") == session_id:
-            return record
-
-    return None
+def get_research_session(session_id):
+    return next(
+        (item for item in _history()
+         if item["session_id"] == session_id),
+        None,
+    )
 
 
-def clear_research_history() -> None:
-    """Clear research history from the current session."""
-
+def clear_research_history():
     st.session_state["research_history"] = []
