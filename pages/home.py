@@ -1,124 +1,148 @@
 
-"""GeneRescue AI - Main research workspace."""
+"""GeneRescue AI research workspace."""
 
 import streamlit as st
 
 
-st.markdown(
-    """
-    <div class="brand-title">GeneRescue AI</div>
-    <div class="brand-subtitle">
-        Intelligent Genetic Rescue System for Crop Improvement
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.write("")
-
-st.markdown(
-    """
-    <div class="page-heading">Research Workspace</div>
-    <div class="page-description">
-        Select a bioinformatics tool to begin your investigation.
-        Each module can be used independently.
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.write("")
-
 TOOLS = [
     {
+        "key": "sequence_analysis",
+        "number": "01",
+        "icon": "🧬",
         "name": "Sequence Analysis",
         "description": (
             "Analyze DNA, RNA and protein sequences, "
-            "calculate sequence properties and assess quality."
+            "composition, GC content and sequence quality."
         ),
-        "icon": "🧬",
-        "page": "pages/sequence_analysis.py",
     },
     {
+        "key": "gene_discovery",
+        "number": "02",
+        "icon": "🔎",
         "name": "Gene Discovery",
         "description": (
-            "Identify candidate open reading frames and "
-            "investigate gene-related sequence features."
+            "Identify candidate open reading frames "
+            "across six reading frames."
         ),
-        "icon": "🔬",
-        "page": "pages/gene_discovery.py",
     },
     {
+        "key": "variant_analysis",
+        "number": "03",
+        "icon": "🧪",
         "name": "Variant Analysis",
         "description": (
-            "Inspect genetic variants, classify variant types "
-            "and examine their annotations."
+            "Explore VCF records and classify genetic variants."
         ),
-        "icon": "🧪",
-        "page": "pages/variant_analysis.py",
     },
     {
+        "key": "database_explorer",
+        "number": "04",
+        "icon": "🌐",
         "name": "Database Explorer",
         "description": (
-            "Search biological databases and retrieve "
-            "gene, protein and literature records."
+            "Search NCBI, Ensembl Plants, UniProt and PubMed."
         ),
-        "icon": "🌐",
-        "page": "pages/database_explorer.py",
     },
     {
+        "key": "functional_annotation",
+        "number": "05",
+        "icon": "🔬",
         "name": "Functional Annotation",
         "description": (
-            "Investigate protein domains, biological functions "
-            "and cross-database annotations."
+            "Investigate protein records, domains "
+            "and functional annotations."
         ),
-        "icon": "🧫",
-        "page": "pages/functional_annotation.py",
     },
     {
+        "key": "crop_intelligence",
+        "number": "06",
+        "icon": "🌾",
         "name": "Crop Intelligence",
         "description": (
-            "Investigate crop-associated genes and evaluate "
-            "evidence-supported improvement hypotheses."
+            "Explore plant genomics resources and "
+            "crop-related scientific literature."
         ),
-        "icon": "🌾",
-        "page": "pages/crop_intelligence.py",
     },
 ]
 
-for row_start in range(0, len(TOOLS), 3):
-    columns = st.columns(3, gap="large")
 
-    for column, tool in zip(
-        columns,
-        TOOLS[row_start:row_start + 3],
-    ):
-        with column:
-            st.markdown(
-                f"""
-                <div class="tool-card">
-                    <div style="font-size:30px;">
-                        {tool["icon"]}
+def render():
+    st.markdown(
+        '<div class="page-heading">Research Workspace</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="page-description">'
+        'Select an independent research module to begin your analysis.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+
+    for row_start in range(0, len(TOOLS), 2):
+        columns = st.columns(2, gap="large")
+
+        for column, tool in zip(
+            columns,
+            TOOLS[row_start:row_start + 2],
+        ):
+            with column:
+                st.markdown(
+                    f"""
+                    <div class="tool-card">
+                        <div style="
+                            display:flex;
+                            justify-content:space-between;
+                            align-items:center;
+                        ">
+                            <span style="font-size:30px">
+                                {tool["icon"]}
+                            </span>
+                            <span style="
+                                color:#78917E;
+                                font-size:12px;
+                                font-weight:700;
+                            ">
+                                MODULE {tool["number"]}
+                            </span>
+                        </div>
+                        <h3>{tool["name"]}</h3>
+                        <p>{tool["description"]}</p>
                     </div>
-                    <h3>{tool["name"]}</h3>
-                    <p>{tool["description"]}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            if st.button(
-                f"Open {tool['name']}",
-                key=f"open_{tool['name']}",
-                use_container_width=True,
-            ):
-                st.switch_page(tool["page"])
+                if st.button(
+                    f"Open {tool['name']} →",
+                    key=f"open_{tool['key']}",
+                    use_container_width=True,
+                ):
+                    st.session_state["current_page"] = tool["key"]
+                    st.rerun()
 
-            st.write("")
+                st.write("")
 
-st.divider()
+    st.divider()
 
-st.caption(
-    "Research outputs are computational findings. "
-    "Predictions require independent biological validation."
-)
+    projects = st.session_state.get("research_projects", [])
+    evidence = st.session_state.get("research_evidence", [])
+    history = st.session_state.get("research_history", [])
+
+    st.markdown("### Current session")
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Research projects", len(projects))
+    c2.metric("Saved evidence", len(evidence))
+    c3.metric("Research activities", len(history))
+
+    st.caption(
+        "These records are temporary and remain available only "
+        "during the active application session."
+    )
+
+    if st.button("Return to Welcome Page"):
+        st.session_state["current_page"] = "welcome"
+        st.rerun()
