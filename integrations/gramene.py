@@ -1,47 +1,63 @@
 
-"""Gramene resource links for GeneRescue AI."""
+"""Gramene and plant genomics resource links."""
 
 from urllib.parse import quote
 
 
 def resource_links(query):
-    """Return clearly labelled external resource search links."""
+    """Generate direct search links for plant genomics resources."""
+    term = quote(str(query).strip())
 
-    if not query or not query.strip():
-        raise ValueError("Enter a crop, gene or trait.")
-
-    encoded = quote(query.strip())
+    if not term:
+        raise ValueError("Enter a gene, organism or crop name.")
 
     return [
         {
             "name": "Gramene",
-            "url": (
-                "https://www.gramene.org/search?"
-                f"q={encoded}"
-            ),
+            "url": f"https://www.gramene.org/search?query={term}",
             "note": (
-                "Search Gramene's crop genomics and "
-                "comparative genomics resources."
+                "Plant comparative genomics and crop information. "
+                "The link opens the Gramene resource."
             ),
         },
         {
             "name": "Ensembl Plants",
             "url": (
                 "https://plants.ensembl.org/Multi/Search/Results?"
-                f"q={encoded}"
+                f"q={term}"
             ),
             "note": (
-                "Search plant genome and gene resources."
+                "Search plant genomes, genes and genomic features."
             ),
         },
         {
             "name": "NCBI",
             "url": (
                 "https://www.ncbi.nlm.nih.gov/search/all/?term="
-                f"{encoded}"
+                f"{term}"
             ),
             "note": (
-                "Search NCBI biological records and resources."
+                "Search NCBI biological records and publications."
+            ),
+        },
+        {
+            "name": "UniProt",
+            "url": (
+                "https://www.uniprot.org/uniprotkb?"
+                f"query={term}"
+            ),
+            "note": (
+                "Search protein sequences and functional annotations."
             ),
         },
     ]
+
+
+def gramene_gene_url(identifier):
+    """Return a Gramene search URL for a gene or accession."""
+    term = quote(str(identifier).strip())
+
+    if not term:
+        raise ValueError("A gene identifier is required.")
+
+    return f"https://www.gramene.org/search?query={term}"
