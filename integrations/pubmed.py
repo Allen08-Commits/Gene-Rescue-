@@ -1,34 +1,34 @@
 
-"""PubMed literature search using NCBI E-utilities."""
+"""PubMed integration for GeneRescue AI."""
 
 import os
 import xml.etree.ElementTree as ET
-
 import streamlit as st
 
 from integrations import (
-    ExternalDatabaseError,
-    provenance,
     request_json,
     request_text,
+    provenance,
+    ExternalDatabaseError,
 )
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
 
-def _setting(name: str, default: str = "") -> str:
-    try:
-        return str(st.secrets.get(name, os.getenv(name, default)))
-    except Exception:
-        return os.getenv(name, default)
-
-
-def _params(extra: dict) -> dict:
-    params = dict(extra)
+def _params(values):
+    params = dict(values)
     params["tool"] = "GeneRescueAI"
 
-    email = _setting("NCBI_EMAIL")
-    api_key = _setting("NCBI_API_KEY")
+    try:
+        email = str(
+            st.secrets.get("NCBI_EMAIL", os.getenv("NCBI_EMAIL", ""))
+        ).strip()
+        api_key = str(
+            st.secrets.get("NCBI_API_KEY", os.getenv("NCBI_API_KEY", ""))
+        ).strip()
+    except Exception:
+        email = os.getenv("NCBI_EMAIL", "").strip()
+        api_key = os.getenv("NCBI_API_KEY", "").strip()
 
     if email:
         params["email"] = email
@@ -38,41 +38,39 @@ def _params(extra: dict) -> dict:
     return params
 
 
-def search_pubmed(
-    query: str,
-    limit: int = 10,
-) -> dict:
-    """Search PubMed and return matching PMIDs."""
-    if not query.strip():
+def search_literature(query, limit=10):
+    """Search PubMed and return article metadata."""
+    if not query or not query.strip():
         raise ValueError("Enter a literature search query.")
 
-    if not 1 <= limit <= 100:
+    if not 1 <= int(limit) <= 100:
         raise ValueError("Limit must be between 1 and 100.")
 
     endpoint = BASE_URL + "esearch.fcgi"
     params = _params({
         "db": "pubmed",
         "term": query.strip(),
-        "retmax": limit,
+        "retmax": int(limit),
         "retmode": "json",
         "sort": "relevance",
     })
 
     data = request_json(endpoint, params=params)
     result = data.get("esearchresult", {})
+    ids = result.get("idlist", [])
 
-    return {
-        "query": query,
-        "count": int(result.get("count", 0)),
-        "pmids": result.get("idlist", []),
-        "provenance": provenance("PubMed", endpoint, params),
-    }
+    if not ids:
+        return []
+
+    articles = fetch_articles(ids)
+
+    return articles
 
 
-def fetch_pubmed_articles(pmids: list[str]) -> dict:
-    """Retrieve article titles, journal details and available abstracts."""
+def fetch_articles(pmids):
+    """Retrieve article titles, journals, dates and abstracts."""
     if not pmids:
-        raise ValueError("At least one PMID is required.")
+        return []
 
     endpoint = BASE_URL + "efetch.fcgi"
     params = _params({
@@ -81,10 +79,10 @@ def fetch_pubmed_articles(pmids: list[str]) -> dict:
         "retmode": "xml",
     })
 
-    xml_content = request_text(endpoint, params=params)
+    content = request_text(endpoint, params=params)
 
     try:
-        root = ET.fromstring(xml_content)
+        root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise ExternalDatabaseError(
             "PubMed returned invalid XML."
@@ -93,33 +91,37 @@ def fetch_pubmed_articles(pmids: list[str]) -> dict:
     articles = []
 
     for article in root.findall(".//PubmedArticle"):
-        def get_text(path: str) -> str:
+
+        def value(path):
             element = article.find(path)
             if element is None:
                 return ""
             return " ".join(
+                text.strip()
+                for text in element.itertext()
+                if text.strip()
+            )
+
+        pmid = value(".//PMID")
+        title = value(".//ArticleTitle")
+        journal = value(".//Journal/Title")
+
+        year = (
+            value(".//PubDate/Year")
+            or value(".//PubDate/MedlineDate")
+        )
+
+        abstract_parts = []
+
+        for element in article.findall(".//Abstract/AbstractText"):
+            text = " ".join(
                 part.strip()
                 for part in element.itertext()
                 if part.strip()
             )
 
-        pmid = get_text(".//PMID")
-        title = get_text(".//ArticleTitle")
-        journal = get_text(".//Journal/Title")
-        year = (
-            get_text(".//PubDate/Year")
-            or get_text(".//PubDate/MedlineDate")
-        )
-
-        abstract_parts = []
-        for part in article.findall(".//Abstract/AbstractText"):
-            text = " ".join(
-                value.strip()
-                for value in part.itertext()
-                if value.strip()
-            )
-            label = part.attrib.get("Label", "")
             if text:
+                label = element.attrib.get("Label", "")
                 abstract_parts.append(
                     f"{label}: {text}" if label else text
                 )
@@ -129,15 +131,13 @@ def fetch_pubmed_articles(pmids: list[str]) -> dict:
             "title": title,
             "journal": journal,
             "year": year,
-            "abstract": "\n".join(abstract_parts),
-            "pubmed_url": (
-                f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                if pmid else ""
-            ),
+            "abstract": " ".join(abstract_parts),
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
         })
 
-    return {
-        "articles": articles,
-        "record_count": len(articles),
-        "provenance": provenance("PubMed", endpoint, params),
-    }
+    return articles
+
+
+def search_pubmed(query, limit=10):
+    """Backward-compatible PubMed search."""
+    return search_literature(query, limit)
