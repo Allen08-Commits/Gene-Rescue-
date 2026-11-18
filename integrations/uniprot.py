@@ -1,249 +1,143 @@
 
-"""UniProt REST API integration for GeneRescue AI.
-
-Features:
-- Search UniProtKB protein records
-- Filter by organism taxonomy ID
-- Filter for reviewed (Swiss-Prot) records
-- Retrieve a protein entry by accession
-- Retrieve a protein sequence in FASTA format
-- Retrieve additional search pages
-- Preserve query and retrieval provenance
-
-Official API:
-https://rest.uniprot.org
-"""
+"""UniProt integration for GeneRescue AI."""
 
 from urllib.parse import quote
 
 from integrations import (
-    ExternalDatabaseError,
-    provenance,
     request_json,
     request_text,
+    provenance,
+    ExternalDatabaseError,
 )
 
 BASE_URL = "https://rest.uniprot.org"
-SEARCH_ENDPOINT = f"{BASE_URL}/uniprotkb/search"
 
 
-def _validate_text(value: str, field_name: str) -> str:
-    """Validate and normalize a required text parameter."""
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} is required.")
-    return value.strip()
+def search_proteins(
+    query,
+    organism_id=None,
+    reviewed_only=False,
+    limit=10,
+    size=None,
+    fields=None,
+):
+    """Search UniProtKB and return a list of protein records."""
 
+    if not query or not query.strip():
+        raise ValueError("Enter a protein search query.")
 
-def _validate_limit(limit: int) -> int:
-    """Validate the maximum number of records per request."""
-    if isinstance(limit, bool) or not isinstance(limit, int):
-        raise ValueError("Limit must be an integer.")
+    if size is not None:
+        limit = size
 
-    if not 1 <= limit <= 500:
+    if not 1 <= int(limit) <= 500:
         raise ValueError("Limit must be between 1 and 500.")
 
-    return limit
-
-
-def _build_search_query(
-    query: str,
-    organism_id: int | None = None,
-    reviewed_only: bool = False,
-) -> str:
-    """Build a UniProt query using supported search syntax."""
-    search_query = _validate_text(query, "Search query")
+    search_query = query.strip()
 
     if organism_id is not None:
-        if isinstance(organism_id, bool) or not isinstance(
-            organism_id, int
-        ):
-            raise ValueError("Organism ID must be an integer.")
-
-        if organism_id <= 0:
-            raise ValueError("Organism ID must be positive.")
-
-        search_query += f" AND organism_id:{organism_id}"
+        search_query += f" AND organism_id:{int(organism_id)}"
 
     if reviewed_only:
         search_query += " AND reviewed:true"
 
-    return search_query
-
-
-def search_proteins(
-    query: str,
-    organism_id: int | None = None,
-    reviewed_only: bool = False,
-    limit: int = 10,
-    fields: list[str] | None = None,
-) -> dict:
-    """Search UniProtKB and return protein records.
-
-    Args:
-        query:
-            UniProt search expression, protein name, gene name,
-            accession or other supported search term.
-
-        organism_id:
-            Optional NCBI taxonomy identifier.
-
-        reviewed_only:
-            If True, restrict results to reviewed UniProtKB records.
-
-        limit:
-            Maximum number of results to retrieve (1-500).
-
-        fields:
-            Optional list of UniProt field names to return.
-            When omitted, UniProt's default fields are returned.
-
-    Returns:
-        Dictionary containing query, records, count and provenance.
-    """
-    limit = _validate_limit(limit)
-
-    if not isinstance(reviewed_only, bool):
-        raise ValueError("reviewed_only must be True or False.")
-
-    search_query = _build_search_query(
-        query=query,
-        organism_id=organism_id,
-        reviewed_only=reviewed_only,
-    )
+    endpoint = f"{BASE_URL}/uniprotkb/search"
 
     params = {
         "query": search_query,
         "format": "json",
-        "size": limit,
+        "size": int(limit),
     }
 
-    if fields is not None:
-        if not isinstance(fields, list) or not fields:
-            raise ValueError("Fields must be a non-empty list.")
+    if fields:
+        params["fields"] = ",".join(fields)
 
-        cleaned_fields = [
-            _validate_text(field, "Field name")
-            for field in fields
-        ]
-        params["fields"] = ",".join(cleaned_fields)
+    data = request_json(endpoint, params=params)
 
-    data = request_json(
-        SEARCH_ENDPOINT,
-        params=params,
-    )
+    records = []
 
-    records = data.get("results", [])
+    for item in data.get("results", []):
+        accession = item.get("primaryAccession", "")
 
-    return {
-        "database": "UniProtKB",
-        "query": search_query,
-        "records": records,
-        "record_count": len(records),
-        "result_count": data.get("facets", []),
-        "next_page": data.get("next"),
-        "previous_page": data.get("previous"),
-        "provenance": provenance(
-            source="UniProtKB",
-            endpoint=SEARCH_ENDPOINT,
-            query=params,
-        ),
-    }
+        protein_description = item.get(
+            "proteinDescription", {}
+        )
+
+        recommended = protein_description.get(
+            "recommendedName", {}
+        )
+
+        protein_name = recommended.get(
+            "fullName", {}
+        ).get("value", "")
+
+        organism = item.get("organism", {})
+
+        records.append({
+            "accession": accession,
+            "id": item.get("uniProtkbId", ""),
+            "protein_name": protein_name,
+            "organism": organism.get("scientificName", ""),
+            "taxonomy_id": organism.get("taxonId"),
+            "reviewed": item.get("entryType", ""),
+            "sequence_length": item.get(
+                "sequence", {}
+            ).get("length"),
+            "source_url": (
+                f"https://www.uniprot.org/uniprotkb/{accession}"
+                if accession else ""
+            ),
+            "raw_record": item,
+        })
+
+    return records
 
 
-def get_protein_entry(accession: str) -> dict:
-    """Retrieve a complete UniProtKB entry by accession.
+def get_protein_entry(accession):
+    """Retrieve a complete UniProt protein entry."""
 
-    Args:
-        accession: UniProt accession such as a protein entry ID.
+    if not accession or not accession.strip():
+        raise ValueError("UniProt accession is required.")
 
-    Returns:
-        Protein record with source provenance.
-    """
-    accession = _validate_text(accession, "UniProt accession")
-
-    safe_accession = quote(accession, safe="")
-    endpoint = f"{BASE_URL}/uniprotkb/{safe_accession}"
+    safe_id = quote(accession.strip(), safe="")
+    endpoint = f"{BASE_URL}/uniprotkb/{safe_id}"
 
     params = {"format": "json"}
 
-    data = request_json(
-        endpoint,
-        params=params,
-    )
+    data = request_json(endpoint, params=params)
 
     return {
-        "database": "UniProtKB",
         "accession": accession,
         "record": data,
         "provenance": provenance(
-            source="UniProtKB",
-            endpoint=endpoint,
-            query=params,
+            "UniProtKB",
+            endpoint,
+            params,
         ),
     }
 
 
-def get_protein_fasta(accession: str) -> dict:
-    """Retrieve the amino-acid sequence in FASTA format.
+def get_protein_fasta(accession):
+    """Retrieve a protein sequence in FASTA format."""
 
-    Args:
-        accession: UniProt accession.
+    if not accession or not accession.strip():
+        raise ValueError("UniProt accession is required.")
 
-    Returns:
-        FASTA text, accession and provenance.
-    """
-    accession = _validate_text(accession, "UniProt accession")
+    safe_id = quote(accession.strip(), safe="")
+    endpoint = f"{BASE_URL}/uniprotkb/{safe_id}.fasta"
 
-    safe_accession = quote(accession, safe="")
-    endpoint = f"{BASE_URL}/uniprotkb/{safe_accession}.fasta"
+    fasta = request_text(endpoint)
 
-    fasta_content = request_text(endpoint)
-
-    if not fasta_content.strip().startswith(">"):
+    if not fasta.strip().startswith(">"):
         raise ExternalDatabaseError(
-            "UniProt did not return a valid FASTA response."
+            "UniProt did not return valid FASTA data."
         )
 
     return {
-        "database": "UniProtKB",
         "accession": accession,
-        "fasta": fasta_content.strip(),
+        "fasta": fasta.strip(),
         "provenance": provenance(
-            source="UniProtKB",
-            endpoint=endpoint,
-            query={},
-        ),
-    }
-
-
-def get_next_search_page(next_url: str) -> dict:
-    """Retrieve the next page from a UniProt search response.
-
-    The URL must come directly from the next_page value returned
-    by search_proteins or a previous page retrieval.
-    """
-    next_url = _validate_text(next_url, "Next-page URL")
-
-    if not next_url.startswith(
-        "https://rest.uniprot.org/uniprotkb/search"
-    ):
-        raise ValueError(
-            "The next-page URL must be a UniProtKB search URL."
-        )
-
-    data = request_json(next_url)
-
-    records = data.get("results", [])
-
-    return {
-        "database": "UniProtKB",
-        "records": records,
-        "record_count": len(records),
-        "next_page": data.get("next"),
-        "previous_page": data.get("previous"),
-        "provenance": provenance(
-            source="UniProtKB",
-            endpoint=next_url,
-            query="Pagination request",
+            "UniProtKB",
+            endpoint,
+            {},
         ),
     }
