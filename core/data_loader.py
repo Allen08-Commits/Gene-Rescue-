@@ -1,316 +1,271 @@
 
-from __future__ import annotations
+"""Universal bioinformatics dataset loader."""
 
-import csv
-import io
-import re
+from io import StringIO
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 from Bio import SeqIO
-
-
-SUPPORTED_SEQUENCE_EXTENSIONS = {
-    ".fasta", ".fa", ".fna", ".ffn", ".faa", ".fas"
-}
-
-SUPPORTED_TABLE_EXTENSIONS = {
-    ".csv", ".tsv"
-}
-
-SUPPORTED_VARIANT_EXTENSIONS = {
-    ".vcf"
-}
-
-DNA_ALPHABET = set("ACGTNRYSWKMBDHV")
-RNA_ALPHABET = set("ACGUNRYSWKMBDHV")
-PROTEIN_ALPHABET = set(
-    "ABCDEFGHIKLMNPQRSTVWXYZJUO*"
-)
+from Bio.Seq import Seq
 
 
 class DataValidationError(ValueError):
-    """Raised when uploaded biological data is invalid."""
+    """Raised when an uploaded dataset cannot be validated."""
 
 
-def _decode_content(content: bytes | str) -> str:
-    if isinstance(content, bytes):
-        try:
-            return content.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise DataValidationError(
-                "The uploaded file must use UTF-8 text encoding."
-            ) from exc
+def _read_text(uploaded_file):
+    if isinstance(uploaded_file, (str, Path)):
+        path = Path(uploaded_file)
+        if not path.exists():
+            raise DataValidationError(f"File not found: {path}")
+        return path.read_text(encoding="utf-8-sig")
+
+    if isinstance(uploaded_file, bytes):
+        return uploaded_file.decode("utf-8-sig")
+
+    if hasattr(uploaded_file, "getvalue"):
+        content = uploaded_file.getvalue()
+    elif hasattr(uploaded_file, "read"):
+        content = uploaded_file.read()
+    else:
+        raise DataValidationError("Unsupported file input.")
 
     if isinstance(content, str):
-        return content.lstrip("\ufeff")
-
-    raise DataValidationError("Unsupported file content.")
-
-
-def infer_sequence_type(sequence: str) -> dict[str, Any]:
-    """
-    Infer DNA, RNA or protein from its alphabet.
-
-    Ambiguous sequences are explicitly marked as uncertain.
-    This is alphabet-based inference, not biological identification.
-    """
-    sequence = re.sub(r"\s+", "", sequence).upper()
-
-    if not sequence:
-        raise DataValidationError("Sequence is empty.")
-
-    if any(char.isdigit() for char in sequence):
-        raise DataValidationError(
-            "Sequence contains numeric characters."
-        )
-
-    symbols = set(sequence)
-
-    if symbols.issubset(DNA_ALPHABET):
-        if "U" in symbols:
-            raise DataValidationError(
-                "Invalid DNA alphabet."
-            )
-
-        if symbols.issubset({"A", "C", "G", "T"}):
-            return {
-                "type": "DNA",
-                "confidence": "high",
-                "ambiguous": False
-            }
-
-        return {
-            "type": "DNA",
-            "confidence": "moderate",
-            "ambiguous": True
-        }
-
-    if symbols.issubset(RNA_ALPHABET):
-        if "T" not in symbols and "U" in symbols:
-            return {
-                "type": "RNA",
-                "confidence": "high",
-                "ambiguous": False
-            }
-
-        if "T" in symbols and "U" in symbols:
-            raise DataValidationError(
-                "Sequence contains both T and U. "
-                "Specify the correct biological sequence."
-            )
-
-    if symbols.issubset(PROTEIN_ALPHABET):
-        return {
-            "type": "Protein",
-            "confidence": "moderate",
-            "ambiguous": False
-        }
-
-    invalid = sorted(symbols - DNA_ALPHABET - RNA_ALPHABET - PROTEIN_ALPHABET)
-
-    raise DataValidationError(
-        f"Unsupported sequence symbols: {', '.join(invalid)}"
-    )
-
-
-def load_fasta(content: bytes | str) -> list[dict[str, Any]]:
-    text = _decode_content(content)
-
-    if not text.strip().startswith(">"):
-        raise DataValidationError(
-            "FASTA file must begin with a header starting with '>'."
-        )
+        return content
 
     try:
-        records = list(SeqIO.parse(io.StringIO(text), "fasta"))
+        return content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DataValidationError(
+            "The uploaded file is not valid UTF-8 text."
+        ) from exc
+
+
+def infer_sequence_type(sequence):
+    """Classify a sequence as DNA, RNA, protein or unknown."""
+    seq = str(sequence).upper().replace(" ", "").replace("\n", "")
+
+    if not seq:
+        return "unknown"
+
+    dna = set("ACGTNRYKMSWBDHV")
+    rna = set("ACGUNRYKMSWBDHV")
+    protein = set("ABCDEFGHIKLMNPQRSTVWXYZJUO*")
+
+    chars = set(seq)
+
+    if chars <= dna:
+        return "DNA"
+
+    if chars <= rna and "U" in chars:
+        return "RNA"
+
+    if chars <= protein:
+        return "protein"
+
+    return "unknown"
+
+
+def _validate_sequence(sequence):
+    seq = str(sequence).upper()
+    seq = "".join(seq.split())
+
+    if not seq:
+        raise DataValidationError("An empty sequence was found.")
+
+    if any(char.isspace() for char in seq):
+        raise DataValidationError("Invalid whitespace in sequence.")
+
+    if infer_sequence_type(seq) == "unknown":
+        raise DataValidationError(
+            "Sequence contains unsupported biological symbols."
+        )
+
+    return seq
+
+
+def load_fasta(uploaded_file):
+    """Read FASTA and return a list of sequence records."""
+    text = _read_text(uploaded_file)
+
+    if not text.lstrip().startswith(">"):
+        raise DataValidationError("The file does not appear to be FASTA.")
+
+    records = []
+
+    try:
+        for record in SeqIO.parse(StringIO(text), "fasta"):
+            sequence = _validate_sequence(str(record.seq))
+
+            records.append({
+                "id": record.id,
+                "description": record.description,
+                "sequence": sequence,
+                "sequence_type": infer_sequence_type(sequence),
+                "length": len(sequence),
+            })
     except Exception as exc:
         raise DataValidationError(
-            f"Unable to parse FASTA file: {exc}"
+            f"Could not parse FASTA: {exc}"
         ) from exc
 
     if not records:
-        raise DataValidationError(
-            "No valid FASTA records were found."
-        )
+        raise DataValidationError("No FASTA records were found.")
 
-    output = []
+    return records
 
-    for record in records:
-        sequence = str(record.seq).upper()
 
-        if not sequence:
-            raise DataValidationError(
-                f"Sequence '{record.id}' is empty."
+def load_fastq(uploaded_file):
+    """Read FASTQ records, retaining their quality scores."""
+    text = _read_text(uploaded_file)
+    records = []
+
+    try:
+        for record in SeqIO.parse(StringIO(text), "fastq"):
+            sequence = _validate_sequence(str(record.seq))
+            qualities = record.letter_annotations.get(
+                "phred_quality", []
             )
 
-        sequence_type = infer_sequence_type(sequence)
+            records.append({
+                "id": record.id,
+                "description": record.description,
+                "sequence": sequence,
+                "sequence_type": infer_sequence_type(sequence),
+                "length": len(sequence),
+                "phred_quality": list(qualities),
+            })
+    except Exception as exc:
+        raise DataValidationError(
+            f"Could not parse FASTQ: {exc}"
+        ) from exc
 
-        output.append({
-            "id": record.id,
-            "description": record.description,
-            "sequence": sequence,
-            "length": len(sequence),
-            "sequence_type": sequence_type["type"],
-            "type_confidence": sequence_type["confidence"],
-            "ambiguous": sequence_type["ambiguous"]
-        })
+    if not records:
+        raise DataValidationError("No FASTQ records were found.")
 
-    return output
+    return records
 
 
-def load_table(
-    content: bytes | str,
-    delimiter: str | None = None
-) -> pd.DataFrame:
-    text = _decode_content(content)
+def load_table(uploaded_file, delimiter=None):
+    """Load CSV or TSV data with automatic delimiter detection."""
+    text = _read_text(uploaded_file)
 
     if not text.strip():
         raise DataValidationError("The uploaded table is empty.")
 
-    if delimiter is None:
-        try:
-            delimiter = csv.Sniffer().sniff(
-                text[:10000],
-                delimiters=",\t;"
-            ).delimiter
-        except csv.Error:
-            raise DataValidationError(
-                "Could not identify the table delimiter. "
-                "Please provide a CSV or TSV file."
-            )
-
     try:
-        dataframe = pd.read_csv(
-            io.StringIO(text),
-            sep=delimiter,
-            dtype=str,
-            keep_default_na=False
-        )
+        if delimiter:
+            dataframe = pd.read_csv(StringIO(text), sep=delimiter)
+        else:
+            dataframe = pd.read_csv(
+                StringIO(text),
+                sep=None,
+                engine="python",
+            )
     except Exception as exc:
         raise DataValidationError(
-            f"Unable to read table: {exc}"
+            f"Could not read the table: {exc}"
         ) from exc
 
     if dataframe.empty or len(dataframe.columns) == 0:
-        raise DataValidationError(
-            "The uploaded table contains no usable data."
-        )
+        raise DataValidationError("No usable table data was found.")
 
     dataframe.columns = [
         str(column).strip() for column in dataframe.columns
     ]
 
-    if any(not column for column in dataframe.columns):
-        raise DataValidationError(
-            "Every column must have a valid name."
-        )
-
     return dataframe
 
 
-def load_vcf(content: bytes | str) -> pd.DataFrame:
-    text = _decode_content(content)
-
-    columns = [
-        "CHROM", "POS", "ID", "REF", "ALT",
-        "QUAL", "FILTER", "INFO"
-    ]
-
+def load_vcf(uploaded_file):
+    """Load VCF records into a normalized pandas DataFrame."""
+    text = _read_text(uploaded_file)
     rows = []
+    sample_names = []
 
-    for line_number, line in enumerate(
-        text.splitlines(), start=1
-    ):
-        if not line or line.startswith("##"):
+    for line in text.splitlines():
+        if line.startswith("##"):
             continue
 
         if line.startswith("#CHROM"):
+            sample_names = line.lstrip("#").split("\t")
             continue
 
-        if line.startswith("#"):
+        if not line.strip() or line.startswith("#"):
             continue
 
         fields = line.split("\t")
 
         if len(fields) < 8:
             raise DataValidationError(
-                f"Malformed VCF record at line {line_number}."
+                "A VCF record contains fewer than eight columns."
             )
 
-        row = dict(zip(columns, fields[:8]))
-
-        try:
-            position = int(row["POS"])
-        except ValueError as exc:
-            raise DataValidationError(
-                f"Invalid VCF position at line {line_number}."
-            ) from exc
-
-        if position < 1:
-            raise DataValidationError(
-                f"VCF positions must be positive at line {line_number}."
-            )
-
-        if not row["REF"] or not row["ALT"]:
-            raise DataValidationError(
-                f"Missing REF or ALT allele at line {line_number}."
-            )
-
-        rows.append(row)
+        rows.append({
+            "CHROM": fields[0],
+            "POS": fields[1],
+            "ID": fields[2],
+            "REF": fields[3],
+            "ALT": fields[4],
+            "QUAL": fields[5],
+            "FILTER": fields[6],
+            "INFO": fields[7],
+            "FORMAT": fields[8] if len(fields) > 8 else "",
+            "SAMPLES": fields[9:] if len(fields) > 9 else [],
+        })
 
     if not rows:
-        raise DataValidationError(
-            "No VCF variant records were found."
-        )
+        raise DataValidationError("No VCF variant records were found.")
 
     dataframe = pd.DataFrame(rows)
-
-    dataframe["POS"] = pd.to_numeric(
-        dataframe["POS"],
-        errors="raise"
-    ).astype("int64")
-
+    dataframe.attrs["sample_columns"] = sample_names[9:]
     return dataframe
 
 
-def load_dataset(
-    filename: str,
-    content: bytes | str
-) -> dict[str, Any]:
-    extension = Path(filename).suffix.lower()
+def load_dataset(uploaded_file, file_name=None):
+    """Identify and load a supported biological dataset."""
+    name = file_name or getattr(uploaded_file, "name", "")
+    suffix = Path(str(name)).suffix.lower()
 
-    if extension in SUPPORTED_SEQUENCE_EXTENSIONS:
+    if suffix in {".fa", ".fasta", ".fna", ".faa"}:
         return {
             "format": "FASTA",
-            "data": load_fasta(content),
-            "record_count": len(load_fasta(content))
+            "data": load_fasta(uploaded_file),
         }
 
-    if extension in SUPPORTED_TABLE_EXTENSIONS:
-        delimiter = "\t" if extension == ".tsv" else ","
-        dataframe = load_table(
-            content,
-            delimiter=delimiter
-        )
-
+    if suffix in {".fq", ".fastq"}:
         return {
-            "format": extension[1:].upper(),
-            "data": dataframe,
-            "record_count": len(dataframe)
+            "format": "FASTQ",
+            "data": load_fastq(uploaded_file),
         }
 
-    if extension in SUPPORTED_VARIANT_EXTENSIONS:
-        dataframe = load_vcf(content)
-
+    if suffix == ".vcf":
         return {
             "format": "VCF",
-            "data": dataframe,
-            "record_count": len(dataframe)
+            "data": load_vcf(uploaded_file),
+        }
+
+    if suffix in {".csv", ".tsv", ".txt"}:
+        return {
+            "format": "TABLE",
+            "data": load_table(uploaded_file),
+        }
+
+    text = _read_text(uploaded_file)
+
+    if text.lstrip().startswith(">"):
+        return {
+            "format": "FASTA",
+            "data": load_fasta(text.encode("utf-8")),
+        }
+
+    if text.lstrip().startswith("##fileformat=VCF"):
+        return {
+            "format": "VCF",
+            "data": load_vcf(text.encode("utf-8")),
         }
 
     raise DataValidationError(
-        f"Unsupported file format: {extension or 'unknown'}. "
-        "Supported formats: FASTA, CSV, TSV and VCF."
+        "Unsupported or unrecognized file format. "
+        "Upload FASTA, FASTQ, VCF, CSV, TSV or TXT."
     )
