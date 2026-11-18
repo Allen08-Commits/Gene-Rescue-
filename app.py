@@ -1,116 +1,77 @@
 
-from pathlib import Path
-import streamlit as st
+"""GeneRescue AI - Main application."""
 
-BASE_DIR = Path(__file__).resolve().parent
-CSS_PATH = BASE_DIR / "assets" / "style.css"
+import streamlit as st
+from pathlib import Path
 
 st.set_page_config(
     page_title="GeneRescue AI",
     page_icon="🌱",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-def load_styles():
-    if CSS_PATH.exists():
-        css = CSS_PATH.read_text(encoding="utf-8")
-        st.markdown(
-            f"<style>{css}</style>",
-            unsafe_allow_html=True
-        )
+# Load application styling
+CSS_PATH = Path(__file__).parent / "assets" / "style.css"
 
-load_styles()
+if CSS_PATH.exists():
+    st.markdown(
+        f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>",
+        unsafe_allow_html=True,
+    )
 
-# Shared application state
-st.session_state.setdefault("authenticated", False)
-st.session_state.setdefault("user", None)
-st.session_state.setdefault("active_project", None)
-st.session_state.setdefault("analysis_history", [])
+# Initialize session-only application state
+DEFAULT_STATE = {
+    "active_project": None,
+    "research_history": [],
+    "research_evidence": [],
+    "research_projects": [],
+}
 
-# Hidden navigation: pages control their own visible navigation.
-welcome = st.Page(
-    "pages/welcome.py",
-    title="Welcome",
-    url_path="welcome",
-    default=True
-)
+for key, value in DEFAULT_STATE.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-login = st.Page(
-    "pages/login.py",
-    title="Login",
-    url_path="login"
-)
-
-register = st.Page(
-    "pages/register.py",
-    title="Create Account",
-    url_path="register"
-)
-
-home = st.Page(
-    "pages/home.py",
-    title="Research Tools",
-    url_path="home"
-)
-
-profile = st.Page(
-    "pages/profile.py",
-    title="Profile",
-    url_path="profile"
-)
-
-sequence = st.Page(
-    "pages/sequence_analysis.py",
-    title="Sequence Analysis",
-    url_path="sequence-analysis"
-)
-
-genes = st.Page(
-    "pages/gene_discovery.py",
-    title="Gene Discovery",
-    url_path="gene-discovery"
-)
-
-variants = st.Page(
-    "pages/variant_analysis.py",
-    title="Variant Analysis",
-    url_path="variant-analysis"
-)
-
-database = st.Page(
-    "pages/database_explorer.py",
-    title="Database Explorer",
-    url_path="database-explorer"
-)
-
-functional = st.Page(
-    "pages/functional_annotation.py",
-    title="Functional Annotation",
-    url_path="functional-annotation"
-)
-
-crop = st.Page(
-    "pages/crop_intelligence.py",
-    title="Crop Intelligence",
-    url_path="crop-intelligence"
-)
+# Hidden multipage navigation
+pages = [
+    st.Page(
+        "pages/welcome.py",
+        title="Welcome",
+        default=True,
+    ),
+    st.Page(
+        "pages/home.py",
+        title="Research Workspace",
+    ),
+    st.Page(
+        "pages/sequence_analysis.py",
+        title="Sequence Analysis",
+    ),
+    st.Page(
+        "pages/gene_discovery.py",
+        title="Gene Discovery",
+    ),
+    st.Page(
+        "pages/variant_analysis.py",
+        title="Variant Analysis",
+    ),
+    st.Page(
+        "pages/database_explorer.py",
+        title="Database Explorer",
+    ),
+    st.Page(
+        "pages/functional_annotation.py",
+        title="Functional Annotation",
+    ),
+    st.Page(
+        "pages/crop_intelligence.py",
+        title="Crop Intelligence",
+    ),
+]
 
 navigation = st.navigation(
-    [
-        welcome,
-        login,
-        register,
-        home,
-        profile,
-        sequence,
-        genes,
-        variants,
-        database,
-        functional,
-        crop
-    ],
-    position="hidden"
+    pages,
+    position="hidden",
 )
 
 navigation.run()
