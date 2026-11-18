@@ -1,116 +1,103 @@
 
-"""Ensembl Plants integration for GeneRescue AI."""
+"""Ensembl Plants REST API integration."""
 
-from integrations import (
-    request_json,
-    request_text,
-    provenance,
-)
+from urllib.parse import quote
+
+from integrations import request_json, request_text, provenance
+
 
 BASE_URL = "https://rest.ensembl.org"
 
 
-def _get(path, params=None):
-    endpoint = BASE_URL + path
-
-    data = request_json(
-        endpoint,
-        params=params,
-        headers={"Accept": "application/json"},
-    )
-
-    return data, endpoint
-
-
 def search_plant_genes(query, species="oryza_sativa"):
-    """Search Ensembl Plants for gene symbols or external names."""
-    if not query.strip() or not species.strip():
-        raise ValueError("Gene query and species are required.")
+    """Search Ensembl Plants gene symbols and cross-references."""
+    if not str(query).strip():
+        raise ValueError("Enter a gene symbol or identifier.")
 
     endpoint = (
         f"{BASE_URL}/xrefs/symbol/"
-        f"{species.strip()}/{query.strip()}"
+        f"{quote(species, safe='')}/"
+        f"{quote(str(query), safe='')}"
     )
-
-    params = {"object_type": "gene"}
 
     records = request_json(
         endpoint,
-        params=params,
-        headers={"Accept": "application/json"},
+        headers={"Content-Type": "application/json"},
     )
 
-    return {
-        "database": "Ensembl Plants",
-        "query": query,
-        "species": species,
-        "records": records,
-        "count": len(records) if isinstance(records, list) else 0,
-        "provenance": provenance(
-            "Ensembl Plants",
-            endpoint,
-            params,
-        ),
-    }
+    results = []
+
+    for record in records:
+        results.append({
+            "id": record.get("id", ""),
+            "type": record.get("type", ""),
+            "display_id": record.get("display_id", ""),
+            "description": record.get("description", ""),
+            "species": species,
+            "source_url": endpoint,
+        })
+
+    return results
 
 
-def lookup_gene(identifier, expand=True):
-    """Retrieve a gene record by Ensembl stable ID."""
-    if not identifier.strip():
-        raise ValueError("Ensembl identifier is required.")
-
-    params = {"expand": int(bool(expand))}
-    data, endpoint = _get(
-        f"/lookup/id/{identifier.strip()}",
-        params,
+def lookup_gene(identifier, expand=False):
+    """Retrieve an Ensembl gene record."""
+    endpoint = (
+        f"{BASE_URL}/lookup/id/"
+        f"{quote(str(identifier), safe='')}"
     )
 
-    return {
-        "record": data,
-        "provenance": provenance(
-            "Ensembl Plants", endpoint, params
-        ),
-    }
+    data = request_json(
+        endpoint,
+        params={"expand": int(bool(expand))},
+        headers={"Content-Type": "application/json"},
+    )
+
+    data["_provenance"] = provenance(
+        "Ensembl Plants",
+        endpoint,
+        identifier,
+    )
+
+    return data
 
 
-def get_gene_sequence(identifier, sequence_type="cdna"):
-    """Retrieve genomic, cDNA, CDS or protein sequence."""
+def get_gene_sequence(identifier, sequence_type="genomic"):
+    """Retrieve genomic, cDNA or CDS sequence."""
     allowed = {"genomic", "cdna", "cds", "protein"}
 
     if sequence_type not in allowed:
-        raise ValueError("Unsupported sequence type.")
+        raise ValueError(
+            f"Sequence type must be one of: {', '.join(sorted(allowed))}"
+        )
 
-    endpoint = f"{BASE_URL}/sequence/id/{identifier.strip()}"
-    params = {"type": sequence_type}
+    endpoint = (
+        f"{BASE_URL}/sequence/id/"
+        f"{quote(str(identifier), safe='')}"
+    )
 
     sequence = request_text(
         endpoint,
-        params=params,
+        params={"type": sequence_type},
         headers={"Content-Type": "text/plain"},
     )
 
     return {
-        "identifier": identifier,
+        "identifier": str(identifier),
         "sequence_type": sequence_type,
         "sequence": sequence.strip(),
-        "provenance": provenance(
-            "Ensembl Plants", endpoint, params
-        ),
+        "source_url": endpoint,
     }
 
 
 def get_cross_references(identifier):
-    """Retrieve cross-references for an Ensembl identifier."""
-    data, endpoint = _get(
-        f"/xrefs/id/{identifier.strip()}",
-        {"all_levels": 1},
+    """Retrieve cross-references associated with an Ensembl identifier."""
+    endpoint = (
+        f"{BASE_URL}/xrefs/id/"
+        f"{quote(str(identifier), safe='')}"
     )
 
-    return {
-        "cross_references": data,
-        "provenance": provenance(
-            "Ensembl Plants",
-            endpoint,
-            {"all_levels": 1},
-        ),
-    }
+    return request_json(
+        endpoint,
+        headers={"Content-Type": "application/json"},
+    )
