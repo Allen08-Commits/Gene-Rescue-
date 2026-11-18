@@ -1,77 +1,102 @@
 
-from __future__ import annotations
+"""Sequence quality and composition screening."""
 
-from typing import Any
-
-from core.sequence_analysis import analyze_sequence
+from collections import Counter
 
 
-def assess_sequence_quality(
-    sequence: str
-) -> dict[str, Any]:
-    statistics = analyze_sequence(sequence)
+def assess_sequence_quality(sequence, phred_quality=None):
+    """
+    Assess sequence quality.
 
-    sequence_type = statistics["sequence_type"]
+    Phred metrics are calculated only when actual quality scores
+    are supplied, such as those parsed from FASTQ.
+    """
+    seq = str(sequence).upper()
+    length = len(seq)
 
-    if sequence_type == "Protein":
-        return {
-            "sequence_type": sequence_type,
-            "status": "Composition screening only",
-            "length": statistics["length"],
-            "note": (
-                "This assessment does not establish protein "
-                "folding quality or experimental integrity."
-            )
-        }
+    if not length:
+        raise ValueError("Sequence cannot be empty.")
 
-    length = statistics["length"]
-    ambiguous = statistics["ambiguous_bases"]
-
-    ambiguity_percent = (
-        ambiguous / length * 100
+    ambiguous = sum(
+        1 for base in seq if base not in "ACGTU"
     )
 
-    flags = []
+    result = {
+        "Length": length,
+        "Ambiguous bases": ambiguous,
+        "Ambiguous percentage": round(
+            ambiguous / length * 100, 3
+        ),
+        "GC content (%)": round(
+            (seq.count("G") + seq.count("C")) / length * 100,
+            3,
+        ),
+        "Phred quality available": phred_quality is not None,
+    }
 
-    if length < 100:
-        flags.append(
-            "Short sequence: downstream analysis may be limited."
-        )
+    if phred_quality is not None:
+        scores = [float(score) for score in phred_quality]
 
-    if ambiguity_percent > 5:
-        flags.append(
-            "High proportion of ambiguous nucleotide symbols."
-        )
+        if len(scores) != length:
+            raise ValueError(
+                "Phred score count must match sequence length."
+            )
 
-    if statistics["GC_percent"] < 20:
-        flags.append(
-            "Low GC composition relative to the screening threshold."
-        )
+        if any(score < 0 for score in scores):
+            raise ValueError("Phred scores cannot be negative.")
 
-    if statistics["GC_percent"] > 80:
-        flags.append(
-            "High GC composition relative to the screening threshold."
-        )
+        result.update({
+            "Mean Phred score": round(
+                sum(scores) / len(scores), 3
+            ),
+            "Minimum Phred score": min(scores),
+            "Maximum Phred score": max(scores),
+            "Bases Q20 or higher": sum(
+                score >= 20 for score in scores
+            ),
+            "Bases Q30 or higher": sum(
+                score >= 30 for score in scores
+            ),
+            "Q20 percentage": round(
+                sum(score >= 20 for score in scores) / length * 100,
+                3,
+            ),
+            "Q30 percentage": round(
+                sum(score >= 30 for score in scores) / length * 100,
+                3,
+            ),
+        })
 
-    if ambiguity_percent == 0 and length >= 100:
-        status = "No basic composition warning"
-    elif ambiguity_percent <= 5:
-        status = "Review recommended"
-    else:
-        status = "High ambiguity detected"
+    return result
+
+
+def composition_screen(sequence):
+    """Screen sequence composition without claiming read quality."""
+    seq = str(sequence).upper()
+    length = len(seq)
+
+    if not length:
+        raise ValueError("Sequence cannot be empty.")
+
+    counts = Counter(seq)
+    gc = counts.get("G", 0) + counts.get("C", 0)
+    ambiguous = sum(
+        count for base, count in counts.items()
+        if base not in "ACGTU"
+    )
 
     return {
-        "sequence_type": sequence_type,
-        "length": length,
-        "ambiguity_count": ambiguous,
-        "ambiguity_percent": round(
-            ambiguity_percent, 3
+        "Length": length,
+        "GC content (%)": round(gc / length * 100, 3),
+        "Ambiguous percentage": round(
+            ambiguous / length * 100, 3
         ),
-        "GC_percent": statistics["GC_percent"],
-        "screening_status": status,
-        "flags": flags,
-        "interpretation": (
-            "This is a basic composition screen, not a "
-            "Phred-based sequencing quality assessment."
-        )
+        "Base composition (%)": {
+            base: round(counts.get(base, 0) / length * 100, 3)
+            for base in "ACGTU"
+        },
+        "Interpretation": (
+            "Composition screening only. This is not a substitute "
+            "for FASTQ Phred quality assessment."
+        ),
     }
