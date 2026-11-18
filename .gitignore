@@ -6,11 +6,11 @@ __pycache__/
 venv/
 .env
 .streamlit/secrets.toml
-*.db
-*.sqlite
-*.sqlite3
 .DS_Store
-.vscode/
-.idea/
+Thumbs.db
+
+# Temporary user uploads and generated files
 uploads/
 generated_reports/
+*.sqlite
+*.db
