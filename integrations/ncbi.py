@@ -1,150 +1,156 @@
 
-"""NCBI integration for GeneRescue AI."""
+"""NCBI Entrez database integration."""
 
-import os
-import streamlit as st
+from urllib.parse import urlencode
 
 from integrations import (
     request_json,
     request_text,
+    ncbi_parameters,
     provenance,
     ExternalDatabaseError,
 )
 
-BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 
-def _setting(name):
-    try:
-        return str(st.secrets.get(name, os.getenv(name, ""))).strip()
-    except Exception:
-        return os.getenv(name, "").strip()
-
-
-def _params(values):
-    params = dict(values)
-    params["tool"] = "GeneRescueAI"
-
-    email = _setting("NCBI_EMAIL")
-    api_key = _setting("NCBI_API_KEY")
-
-    if email:
-        params["email"] = email
-    if api_key:
-        params["api_key"] = api_key
-
-    return params
-
-
-def _search(query, database, retmax=10):
-    if not query or not query.strip():
+def _search(query, database="gene", retmax=10):
+    if not str(query).strip():
         raise ValueError("Enter a search query.")
 
-    if not 1 <= int(retmax) <= 100:
-        raise ValueError("Maximum records must be between 1 and 100.")
-
-    endpoint = BASE_URL + "esearch.fcgi"
-    params = _params({
+    params = {
+        **ncbi_parameters(),
         "db": database,
-        "term": query.strip(),
-        "retmax": int(retmax),
+        "term": str(query),
         "retmode": "json",
-    })
+        "retmax": max(1, min(int(retmax), 100)),
+    }
 
-    data = request_json(endpoint, params=params)
+    data = request_json(
+        f"{BASE_URL}/esearch.fcgi",
+        params=params,
+    )
+
     result = data.get("esearchresult", {})
+    ids = result.get("idlist", [])
 
     return {
         "database": database,
         "query": query,
         "count": int(result.get("count", 0)),
-        "ids": result.get("idlist", []),
-        "provenance": provenance("NCBI Entrez", endpoint, params),
+        "ids": ids,
+        "provenance": provenance(
+            "NCBI Entrez",
+            "esearch.fcgi",
+            query,
+        ),
     }
 
 
 def search_gene(query, organism=None, retmax=10):
     """Search NCBI Gene records."""
-    search_term = query.strip()
+    term = str(query).strip()
 
     if organism:
-        search_term += f" AND {organism.strip()}[Organism]"
+        term = f"({term}) AND {organism}[Organism]"
 
-    return _search(search_term, "gene", retmax)
+    return _search(term, database="gene", retmax=retmax)
 
 
 def search_nucleotide(query, retmax=10):
-    """Search NCBI nucleotide records."""
-    return _search(query, "nuccore", retmax)
+    return _search(query, database="nuccore", retmax=retmax)
 
 
 def search_protein(query, retmax=10):
-    """Search NCBI protein records."""
-    return _search(query, "protein", retmax)
+    return _search(query, database="protein", retmax=retmax)
 
 
 def fetch_summaries(ids, database="gene"):
-    """Retrieve summaries for Entrez identifiers."""
+    """Retrieve NCBI summaries for a collection of record IDs."""
+    ids = [str(item) for item in ids if str(item).strip()]
+
     if not ids:
         return []
 
-    endpoint = BASE_URL + "esummary.fcgi"
-    params = _params({
+    params = {
+        **ncbi_parameters(),
         "db": database,
-        "id": ",".join(str(item) for item in ids),
+        "id": ",".join(ids),
         "retmode": "json",
-    })
-
-    data = request_json(endpoint, params=params)
-    result = data.get("result", {})
-
-    records = [
-        result[item]
-        for item in result.get("uids", [])
-        if item in result
-    ]
-
-    return {
-        "records": records,
-        "count": len(records),
-        "provenance": provenance("NCBI Entrez", endpoint, params),
     }
 
+    data = request_json(
+        f"{BASE_URL}/esummary.fcgi",
+        params=params,
+    )
 
-def fetch_record(identifier, database="nuccore",
-                 rettype="gb", retmode="text"):
-    """Retrieve a GenBank, FASTA or other supported record."""
-    if database not in {"nuccore", "protein", "gene"}:
-        raise ValueError("Unsupported NCBI database.")
+    result = data.get("result", {})
+    summaries = []
 
-    endpoint = BASE_URL + "efetch.fcgi"
-    params = _params({
+    for identifier in result.get("uids", []):
+        record = result.get(identifier, {})
+        summaries.append({
+            "id": identifier,
+            "record": record,
+            "source": "NCBI Entrez",
+        })
+
+    return summaries
+
+
+def fetch_record(
+    identifier,
+    database="nuccore",
+    rettype="gb",
+    retmode="text",
+):
+    """Fetch a full NCBI record in the requested format."""
+    if not str(identifier).strip():
+        raise ValueError("A record identifier is required.")
+
+    params = {
+        **ncbi_parameters(),
         "db": database,
-        "id": str(identifier).strip(),
+        "id": str(identifier),
         "rettype": rettype,
         "retmode": retmode,
-    })
+    }
 
-    content = request_text(endpoint, params=params)
+    text = request_text(
+        f"{BASE_URL}/efetch.fcgi",
+        params=params,
+    )
 
     return {
-        "identifier": identifier,
+        "identifier": str(identifier),
         "database": database,
-        "content": content,
-        "provenance": provenance("NCBI Entrez", endpoint, params),
+        "content": text,
+        "provenance": provenance(
+            "NCBI Entrez",
+            "efetch.fcgi",
+            identifier,
+        ),
     }
 
 
-# Backward-compatible function names
-
 def search_ncbi(query, database="gene", limit=10):
-    return _search(query, database, limit)
+    """Compatibility wrapper for general NCBI searches."""
+    return _search(query, database=database, retmax=limit)
 
 
 def fetch_ncbi_summary(ids, database="gene"):
-    return fetch_summaries(ids, database)
+    return fetch_summaries(ids, database=database)
 
 
-def fetch_ncbi_record(identifier, database="nuccore",
-                      rettype="gb", retmode="text"):
-    return fetch_record(identifier, database, rettype, retmode)
+def fetch_ncbi_record(
+    identifier,
+    database="nuccore",
+    rettype="gb",
+    retmode="text",
+):
+    return fetch_record(
+        identifier,
+        database=database,
+        rettype=rettype,
+        retmode=retmode,
+    )
