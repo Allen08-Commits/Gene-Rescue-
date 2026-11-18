@@ -1,9 +1,12 @@
 
-"""Cross-database identifier lookup."""
+"""Cross-database gene and protein identifier lookup."""
+
 from integrations import ensembl_plants, uniprot
 
 
 def map_identifier(identifier, species="oryza_sativa"):
+    """Search a supplied identifier across supported resources."""
+
     identifier = str(identifier).strip()
 
     if not identifier:
@@ -18,9 +21,11 @@ def map_identifier(identifier, species="oryza_sativa"):
     }
 
     try:
-        results["ensembl_results"] = ensembl_plants.search_plant_genes(
-            identifier,
-            species=species,
+        results["ensembl_results"] = (
+            ensembl_plants.search_plant_genes(
+                identifier,
+                species=species,
+            )
         )
     except Exception as exc:
         results["warnings"].append(
@@ -28,9 +33,11 @@ def map_identifier(identifier, species="oryza_sativa"):
         )
 
     try:
-        results["uniprot_results"] = uniprot.search_proteins(
-            identifier,
-            size=10,
+        results["uniprot_results"] = (
+            uniprot.search_proteins(
+                identifier,
+                size=10,
+            )
         )
     except Exception as exc:
         results["warnings"].append(
@@ -38,9 +45,9 @@ def map_identifier(identifier, species="oryza_sativa"):
         )
 
     results["interpretation"] = (
-        "Results are candidate identifier matches. "
-        "Verify organism, accession and sequence before treating "
-        "records from different databases as the same biological entity."
+        "These are candidate database matches. Verify organism, "
+        "accession and sequence before treating records as "
+        "the same biological entity."
     )
 
     return results
