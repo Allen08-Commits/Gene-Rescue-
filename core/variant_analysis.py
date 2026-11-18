@@ -1,160 +1,113 @@
 
-from __future__ import annotations
-
-from collections import Counter
-from typing import Any
+"""Variant record normalization and summary analysis."""
 
 import pandas as pd
 
-from core.data_loader import DataValidationError
 
+def _classify_variant(ref, alt):
+    ref = str(ref).upper()
+    alt = str(alt).upper()
 
-VALID_ALLELES = set("ACGTN")
+    if alt in {"", ".", "*"} or ref in {"", "."}:
+        return "Unknown"
 
+    if "," in alt:
+        return "Multi-allelic"
 
-def classify_variant(
-    reference: str,
-    alternate: str
-) -> str:
-    reference = reference.upper().strip()
-    alternate = alternate.upper().strip()
+    if len(ref) == 1 and len(alt) == 1:
+        return "SNP" if ref != alt else "No change"
 
-    if not reference or not alternate:
-        raise DataValidationError(
-            "Reference and alternate alleles are required."
-        )
-
-    if reference == alternate:
-        return "No change"
-
-    if reference.startswith("<") or alternate.startswith("<"):
-        return "Symbolic variant"
-
-    if any(base not in VALID_ALLELES for base in reference):
-        raise DataValidationError(
-            "Reference allele contains unsupported symbols."
-        )
-
-    if any(base not in VALID_ALLELES for base in alternate):
-        raise DataValidationError(
-            "Alternate allele contains unsupported symbols."
-        )
-
-    if len(reference) == 1 and len(alternate) == 1:
-        return "SNP"
-
-    if len(reference) < len(alternate):
+    if len(ref) < len(alt):
         return "Insertion"
 
-    if len(reference) > len(alternate):
+    if len(ref) > len(alt):
         return "Deletion"
 
     return "MNV"
 
 
-def analyze_variant_record(
-    record: dict[str, Any]
-) -> dict[str, Any]:
-    reference = str(record.get("REF", "")).upper()
-    alternate = str(record.get("ALT", "")).upper()
-
-    position = record.get("POS")
-
-    if position is None:
-        raise DataValidationError(
-            "Variant position is missing."
-        )
-
-    try:
-        position = int(position)
-    except (ValueError, TypeError) as exc:
-        raise DataValidationError(
-            "Variant position must be an integer."
-        ) from exc
-
-    if position < 1:
-        raise DataValidationError(
-            "Variant position must be positive."
-        )
-
-    if "," in alternate:
-        alternate_alleles = alternate.split(",")
-
-        types = [
-            classify_variant(reference, allele)
-            for allele in alternate_alleles
-        ]
-
-        variant_type = (
-            types[0]
-            if len(set(types)) == 1
-            else "Mixed multiallelic"
-        )
-    else:
-        alternate_alleles = [alternate]
-        variant_type = classify_variant(
-            reference,
-            alternate
-        )
+def analyze_variant_record(record):
+    """Normalize and classify one variant record."""
+    ref = record.get("REF", record.get("ref", ""))
+    alt = record.get("ALT", record.get("alt", ""))
 
     return {
-        "CHROM": record.get("CHROM", ""),
-        "POS": position,
-        "ID": record.get("ID", "."),
-        "REF": reference,
-        "ALT": alternate,
-        "Variant_Type": variant_type,
-        "Allele_Change": f"{reference}>{alternate}",
-        "QUAL": record.get("QUAL", "."),
-        "FILTER": record.get("FILTER", "."),
-        "Interpretation": (
-            "Variant classification only. Reference-based "
-            "functional annotation has not been performed."
-        )
+        "Chromosome": record.get(
+            "CHROM", record.get("chromosome", record.get("CHROMOSOME", ""))
+        ),
+        "Position": record.get(
+            "POS", record.get("position", record.get("POS", ""))
+        ),
+        "Variant_ID": record.get(
+            "ID", record.get("variant_id", "")
+        ),
+        "Reference": ref,
+        "Alternate": alt,
+        "Variant_Type": _classify_variant(ref, alt),
+        "Quality": record.get("QUAL", record.get("quality", "")),
+        "Filter": record.get("FILTER", record.get("filter", "")),
     }
 
 
-def analyze_variants(
-    dataframe: pd.DataFrame
-) -> pd.DataFrame:
-    required = {"POS", "REF", "ALT"}
+def analyze_variants(data):
+    """Analyze a VCF-derived or tabular variant DataFrame."""
+    if not isinstance(data, pd.DataFrame):
+        data = pd.DataFrame(data)
 
-    missing = required - set(dataframe.columns)
+    if data.empty:
+        raise ValueError("No variant records were supplied.")
 
-    if missing:
-        raise DataValidationError(
-            f"Missing required variant columns: {', '.join(sorted(missing))}"
+    columns = {str(col).upper(): col for col in data.columns}
+
+    ref_column = columns.get("REF") or columns.get("REFERENCE")
+    alt_column = columns.get("ALT") or columns.get("ALTERNATE")
+
+    if ref_column is None or alt_column is None:
+        raise ValueError(
+            "Variant data must contain REF and ALT columns "
+            "(or Reference and Alternate)."
         )
 
-    results = []
+    output = []
 
-    for _, row in dataframe.iterrows():
-        results.append(
-            analyze_variant_record(row.to_dict())
-        )
+    for _, row in data.iterrows():
+        record = row.to_dict()
 
-    return pd.DataFrame(results)
+        if ref_column != "REF":
+            record["REF"] = row[ref_column]
+
+        if alt_column != "ALT":
+            record["ALT"] = row[alt_column]
+
+        output.append(analyze_variant_record(record))
+
+    return pd.DataFrame(output)
 
 
-def summarize_variants(
-    dataframe: pd.DataFrame
-) -> dict[str, Any]:
-    if "Variant_Type" not in dataframe.columns:
-        raise DataValidationError(
-            "Variant_Type column is missing. "
-            "Run variant analysis first."
-        )
+def summarize_variants(variants):
+    """Summarize normalized variant records."""
+    if not isinstance(variants, pd.DataFrame):
+        variants = pd.DataFrame(variants)
 
-    counts = Counter(
-        dataframe["Variant_Type"].fillna("Unknown")
-    )
+    if variants.empty:
+        return {
+            "Total variants": 0,
+            "Variant type counts": {},
+        }
+
+    if "Variant_Type" not in variants.columns:
+        variants = analyze_variants(variants)
+
+    counts = variants["Variant_Type"].value_counts().to_dict()
 
     return {
-        "total_variants": int(len(dataframe)),
-        "variant_type_counts": dict(counts),
-        "unique_chromosomes": (
-            int(dataframe["CHROM"].nunique())
-            if "CHROM" in dataframe.columns
-            else None
-        )
+        "Total variants": int(len(variants)),
+        "Variant type counts": {
+            str(key): int(value)
+            for key, value in counts.items()
+        },
+        "SNP count": int(counts.get("SNP", 0)),
+        "Insertion count": int(counts.get("Insertion", 0)),
+        "Deletion count": int(counts.get("Deletion", 0)),
+        "MNV count": int(counts.get("MNV", 0)),
     }
