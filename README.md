@@ -1,9 +1,11 @@
 
 # GeneRescue AI
 
-GeneRescue AI is a crop genomics and bioinformatics research platform designed to help researchers investigate biological sequences, discover candidate genes, analyse genetic variants, retrieve functional annotations and explore crop-improvement evidence.
+Intelligent Genetic Rescue System for Crop Improvement.
 
-## Main research tools
+GeneRescue AI is a Streamlit-based bioinformatics research platform.
+
+## Research tools
 
 1. Sequence Analysis
 2. Gene Discovery
@@ -12,16 +14,7 @@ GeneRescue AI is a crop genomics and bioinformatics research platform designed t
 5. Functional Annotation
 6. Crop Intelligence
 
-## External biological resources
-
-- NCBI
-- Ensembl Plants
-- UniProt
-- InterPro
-- Gramene
-- PubMed
-
-## Technology
+## Technologies
 
 - Python
 - Streamlit
@@ -29,29 +22,36 @@ GeneRescue AI is a crop genomics and bioinformatics research platform designed t
 - Pandas
 - NumPy
 - Plotly
-- Scikit-learn
-- Supabase
+- NCBI Entrez
+- Ensembl Plants
+- UniProt
+- InterPro
+- PubMed
 
 ## Installation
 
-Install the required packages:
+Install dependencies:
 
-```bash
-pip install -r requirements.txt
-```
-
-Configure the application secrets using Streamlit secrets or environment variables.
+    pip install -r requirements.txt
 
 Start the application:
 
-```bash
-streamlit run app.py
-```
+    streamlit run app.py
 
-## Scientific limitations
+## Configuration
 
-Computational predictions are research hypotheses, not experimental confirmation. Sequence similarity does not independently establish gene function or crop-trait causality. All results should be interpreted using their source records and supporting evidence.
+NCBI email and API key are optional.
 
-## Data policy
+Create a local `.env` file using `.env.example` as a reference if needed.
 
-The application does not automatically load demonstration datasets. Researchers provide their own input data.
+Do not commit API keys or passwords.
+
+## Data handling
+
+The application does not require user accounts or Supabase.
+
+Research projects, evidence and history are stored temporarily in the active Streamlit session. They are not permanent cloud records.
+
+## Research disclaimer
+
+Database records and computational predictions are research-support information. Biological conclusions require appropriate validation.
