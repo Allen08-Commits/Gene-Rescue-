@@ -1,143 +1,140 @@
 
-"""PubMed integration for GeneRescue AI."""
+"""PubMed literature search integration."""
 
-import os
 import xml.etree.ElementTree as ET
-import streamlit as st
 
 from integrations import (
     request_json,
     request_text,
+    ncbi_parameters,
     provenance,
-    ExternalDatabaseError,
 )
 
-BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
-
-def _params(values):
-    params = dict(values)
-    params["tool"] = "GeneRescueAI"
-
-    try:
-        email = str(
-            st.secrets.get("NCBI_EMAIL", os.getenv("NCBI_EMAIL", ""))
-        ).strip()
-        api_key = str(
-            st.secrets.get("NCBI_API_KEY", os.getenv("NCBI_API_KEY", ""))
-        ).strip()
-    except Exception:
-        email = os.getenv("NCBI_EMAIL", "").strip()
-        api_key = os.getenv("NCBI_API_KEY", "").strip()
-
-    if email:
-        params["email"] = email
-    if api_key:
-        params["api_key"] = api_key
-
-    return params
+BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 
 def search_literature(query, limit=10):
-    """Search PubMed and return article metadata."""
-    if not query or not query.strip():
+    """Search PubMed and return matching PMID identifiers."""
+    if not str(query).strip():
         raise ValueError("Enter a literature search query.")
 
-    if not 1 <= int(limit) <= 100:
-        raise ValueError("Limit must be between 1 and 100.")
-
-    endpoint = BASE_URL + "esearch.fcgi"
-    params = _params({
+    params = {
+        **ncbi_parameters(),
         "db": "pubmed",
-        "term": query.strip(),
-        "retmax": int(limit),
+        "term": str(query),
         "retmode": "json",
+        "retmax": max(1, min(int(limit), 100)),
         "sort": "relevance",
-    })
+    }
 
-    data = request_json(endpoint, params=params)
+    data = request_json(
+        f"{BASE_URL}/esearch.fcgi",
+        params=params,
+    )
+
     result = data.get("esearchresult", {})
-    ids = result.get("idlist", [])
+    pmids = result.get("idlist", [])
 
-    if not ids:
-        return []
-
-    articles = fetch_articles(ids)
-
-    return articles
-
-
-def fetch_articles(pmids):
-    """Retrieve article titles, journals, dates and abstracts."""
     if not pmids:
         return []
 
-    endpoint = BASE_URL + "efetch.fcgi"
-    params = _params({
-        "db": "pubmed",
-        "id": ",".join(str(pmid) for pmid in pmids),
-        "retmode": "xml",
-    })
+    return fetch_articles(pmids)
 
-    content = request_text(endpoint, params=params)
+
+def fetch_articles(pmids):
+    """Fetch PubMed article metadata for PMID identifiers."""
+    identifiers = [
+        str(pmid).strip()
+        for pmid in pmids
+        if str(pmid).strip()
+    ]
+
+    if not identifiers:
+        return []
+
+    params = {
+        **ncbi_parameters(),
+        "db": "pubmed",
+        "id": ",".join(identifiers),
+        "retmode": "xml",
+    }
+
+    xml_text = request_text(
+        f"{BASE_URL}/efetch.fcgi",
+        params=params,
+    )
 
     try:
-        root = ET.fromstring(content)
+        root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
-        raise ExternalDatabaseError(
-            "PubMed returned invalid XML."
+        raise ValueError(
+            "PubMed returned an unreadable XML response."
         ) from exc
 
     articles = []
 
     for article in root.findall(".//PubmedArticle"):
+        pmid = article.findtext(".//PMID", default="")
 
-        def value(path):
-            element = article.find(path)
-            if element is None:
-                return ""
-            return " ".join(
-                text.strip()
-                for text in element.itertext()
-                if text.strip()
-            )
+        title_element = article.find(".//ArticleTitle")
+        title = (
+            "".join(title_element.itertext())
+            if title_element is not None else ""
+        )
 
-        pmid = value(".//PMID")
-        title = value(".//ArticleTitle")
-        journal = value(".//Journal/Title")
+        journal = article.findtext(
+            ".//Journal/Title",
+            default="",
+        )
 
         year = (
-            value(".//PubDate/Year")
-            or value(".//PubDate/MedlineDate")
+            article.findtext(
+                ".//JournalIssue/PubDate/Year",
+                default="",
+            )
+            or article.findtext(
+                ".//JournalIssue/PubDate/MedlineDate",
+                default="",
+            )
         )
 
         abstract_parts = []
 
-        for element in article.findall(".//Abstract/AbstractText"):
-            text = " ".join(
-                part.strip()
-                for part in element.itertext()
-                if part.strip()
-            )
+        for abstract_element in article.findall(
+            ".//Abstract/AbstractText"
+        ):
+            label = abstract_element.attrib.get("Label", "")
+            content = "".join(abstract_element.itertext())
 
-            if text:
-                label = element.attrib.get("Label", "")
-                abstract_parts.append(
-                    f"{label}: {text}" if label else text
-                )
+            if label:
+                abstract_parts.append(f"{label}: {content}")
+            else:
+                abstract_parts.append(content)
+
+        abstract = " ".join(abstract_parts)
 
         articles.append({
             "pmid": pmid,
             "title": title,
             "journal": journal,
             "year": year,
-            "abstract": " ".join(abstract_parts),
+            "abstract": abstract,
             "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            "source": "PubMed",
         })
 
     return articles
 
 
 def search_pubmed(query, limit=10):
-    """Backward-compatible PubMed search."""
-    return search_literature(query, limit)
+    """Compatibility wrapper for literature search."""
+    return {
+        "query": query,
+        "articles": search_literature(query, limit=limit),
+        "provenance": provenance(
+            "PubMed",
+            "esearch.fcgi and efetch.fcgi",
+            query,
+        ),
+    }
