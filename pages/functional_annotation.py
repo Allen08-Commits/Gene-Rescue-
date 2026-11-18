@@ -1,106 +1,157 @@
 
-"""GeneRescue AI - Functional Annotation."""
+"""Functional Annotation research module."""
 
 import pandas as pd
 import streamlit as st
 
 from integrations import uniprot, interpro
 
+from services.evidence_manager import save_evidence
 from services.session_manager import create_research_session
+from services.report_manager import generate_pdf_report
 
 
 def render():
-    st.title("Functional Annotation")
-
+    st.title("🔬 Functional Annotation")
     st.write(
-        "Investigate protein identity, organism information, "
-        "protein families and conserved functional domains."
+        "Retrieve protein information and investigate "
+        "protein family and domain annotations."
     )
 
     accession = st.text_input(
-        "UniProt accession or protein search term",
-        placeholder="Enter a UniProt accession or protein name...",
+        "UniProt protein accession",
+        placeholder="Enter an accession, e.g. P04637",
     )
 
-    if st.button(
-        "Retrieve Functional Annotation",
-        type="primary",
-        disabled=not accession.strip(),
-    ):
+    if not accession.strip():
+        st.info("Enter a protein accession to begin.")
+        return
+
+    if st.button("Retrieve protein annotation", type="primary"):
         try:
-            with st.spinner("Searching UniProt..."):
-                proteins = uniprot.search_proteins(
-                    accession,
-                    size=5,
+            with st.spinner("Retrieving UniProt and InterPro records..."):
+                protein = uniprot.get_protein_entry(accession)
+                protein_fasta = uniprot.get_protein_fasta(accession)
+                domain_data = interpro.search_protein_accession(
+                    accession
                 )
 
-            st.divider()
-            st.subheader("UniProt protein records")
+            st.session_state["annotation_protein"] = protein
+            st.session_state["annotation_fasta"] = protein_fasta
+            st.session_state["annotation_domains"] = domain_data
+            st.session_state["annotation_accession"] = accession
 
-            if not proteins:
-                st.info(
-                    "No UniProt records were returned. "
-                    "Check the accession or try another search term."
-                )
-                return
+        except Exception as exc:
+            st.error(f"Annotation retrieval failed: {exc}")
+            return
 
-            st.dataframe(
-                pd.DataFrame(proteins),
-                use_container_width=True,
-                hide_index=True,
-            )
+    if st.session_state.get("annotation_accession") != accession:
+        return
 
-            selected_accession = st.selectbox(
-                "Select protein accession for InterPro lookup",
-                [
-                    item["accession"]
-                    for item in proteins
-                    if item.get("accession")
-                ],
-            )
+    protein = st.session_state.get("annotation_protein")
+    fasta = st.session_state.get("annotation_fasta")
+    domains = st.session_state.get("annotation_domains")
 
-            if selected_accession:
-                with st.spinner("Retrieving InterPro annotations..."):
-                    annotation = (
-                        interpro.search_protein_accession(
-                            selected_accession
-                        )
-                    )
+    if not protein or not domains:
+        return
 
-                st.divider()
-                st.subheader("InterPro domain and family results")
+    record = protein["record"]
+    sequence = fasta["fasta"]
 
-                if annotation:
-                    st.json(annotation)
-                else:
-                    st.info(
-                        "No InterPro matches were returned."
-                    )
+    st.divider()
+    st.subheader("UniProt protein record")
 
-            st.session_state["last_functional_annotation"] = {
-                "uniprot": proteins,
-                "interpro": annotation if selected_accession else None,
+    description = record.get("proteinDescription", {})
+    recommended = description.get("recommendedName", {})
+    name = recommended.get("fullName", {}).get("value", "Not available")
+
+    organism = record.get("organism", {}).get(
+        "scientificName",
+        "Not available",
+    )
+
+    sequence_info = record.get("sequence", {})
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Protein", accession)
+    c2.metric("Sequence length", sequence_info.get("length", "N/A"))
+    c3.metric("Organism", organism)
+
+    st.write("**Protein name:**", name)
+
+    st.subheader("Protein sequence")
+    st.code(sequence, language="text")
+
+    st.subheader("InterPro matches")
+
+    matches = domains.get("matches", [])
+
+    if matches:
+        match_df = pd.DataFrame([
+            {
+                "InterPro accession": item["accession"],
+                "Name": item["name"],
+                "Type": item["type"],
+                "Source database": item["source_database"],
             }
+            for item in matches
+        ])
 
-            create_research_session(
-                tool_name="Functional Annotation",
-                session_title=(
-                    f"Protein annotation: {accession}"
-                ),
-                input_summary=accession,
-                result_summary=(
-                    f"{len(proteins)} UniProt records retrieved."
-                ),
-            )
+        st.metric("Domain/family matches", len(matches))
 
-            st.success("Functional annotation retrieval completed.")
+        st.dataframe(
+            match_df,
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        except Exception as error:
-            st.error(
-                f"Functional annotation failed: {error}"
-            )
+    else:
+        st.info(
+            "No InterPro matches were returned for this accession."
+        )
+
+    if st.button("Save protein evidence"):
+        save_evidence(
+            database="UniProt",
+            identifier=accession,
+            description=name,
+            record_type="protein",
+        )
+
+        st.success("Protein evidence saved.")
+
+    report_sections = [
+        {
+            "heading": "Protein information",
+            "content": (
+                f"Accession: {accession}\n"
+                f"Protein: {name}\n"
+                f"Organism: {organism}\n"
+                f"Length: {sequence_info.get('length', 'N/A')}"
+            ),
+        },
+    ]
+
+    if matches:
+        report_sections.append({
+            "heading": "InterPro matches",
+            "dataframe": match_df,
+        })
+
+    pdf = generate_pdf_report(
+        "GeneRescue AI - Functional Annotation",
+        report_sections,
+    )
+
+    st.download_button(
+        "Download annotation report",
+        data=pdf,
+        file_name="functional_annotation_report.pdf",
+        mime="application/pdf",
+    )
 
     st.caption(
-        "Retrieved protein annotations and domain matches are "
-        "database evidence, not experimental confirmation of function."
+        "Database annotations describe reported or computationally "
+        "predicted protein features. They are not experimental "
+        "confirmation of biological function."
     )
